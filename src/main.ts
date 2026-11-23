@@ -8,7 +8,7 @@ async function bootstrap() {
   configureApp(app);
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('Read Later API')
+    .setTitle('Mastiska API')
     .setVersion('0.1')
     .addBearerAuth()
     .build();

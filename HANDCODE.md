@@ -18,8 +18,8 @@ Search the code for `HAND-CODE` to find each one.
 ## Not started (nothing scaffolded)
 
 - **Ingestion pipeline** (§2A): safe fetching (SSRF, size, timeouts, redirects), extraction, metadata.
-- **Jobs** (§2B): Redis is already running via `docker-compose`, but BullMQ isn't installed or registered yet.
-- **Chunking and embeddings** (§2D): the Postgres image is `pgvector/pgvector:pg17`. Run `CREATE EXTENSION vector` in your first migration that needs it.
+- **Jobs** (§2B): Redis isn't provisioned yet; BullMQ isn't installed or registered.
+- **Chunking and embeddings** (§2D): your Postgres container uses the `pgvector/pgvector:pg18` image. Run `CREATE EXTENSION vector` in your first migration that needs it.
 - **Retrieval and RAG** (§2E), **tool orchestration** (§2F), **observability** (§2G).
 
 ## Things already decided in the scaffold (review them)

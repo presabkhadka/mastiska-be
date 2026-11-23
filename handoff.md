@@ -1,4 +1,4 @@
-# Handoff: Read Later scaffold → you
+# Handoff: Mastiska scaffold → you
 
 This document covers what has been built, where everything lives, why it's shaped the way it is, and where your hand-coded work begins.
 
@@ -16,7 +16,7 @@ It complements two other files:
 - Pagination, sorting, and filtering on the bookmark list.
 - Linking tags to bookmarks and bookmarks to collections. Both are idempotent.
 - Postgres schema created via a TypeORM migration. `synchronize` is off.
-- Docker Compose with Postgres (pgvector image) and Redis.
+- Runs against your local Postgres (pgvector) container.
 - Swagger docs, a health check, and global request validation.
 - 9 unit tests and 5 e2e tests, all passing. Lint and build are clean.
 
@@ -25,7 +25,7 @@ It complements two other files:
 **Decisions you made during planning:**
 - Local JWT auth with access tokens only (no refresh tokens).
 - No frontend yet.
-- Real TypeORM migrations plus Docker Compose (instead of `synchronize: true`).
+- Real TypeORM migrations (instead of `synchronize: true`).
 
 ---
 
@@ -34,7 +34,6 @@ It complements two other files:
 ```bash
 pnpm install
 cp .env.example .env            # already done once; JWT_SECRET must be ≥ 32 chars
-pnpm db:up                      # docker-compose up -d → Postgres :5433, Redis :6379
 pnpm migration:run              # creates all tables
 pnpm dev                        # http://localhost:3000
 ```
@@ -47,24 +46,21 @@ Verification:
 pnpm build && pnpm lint && pnpm test && pnpm test:e2e
 ```
 
-> **Note on Docker:** this machine uses Colima. `docker compose` (the v2 plugin) isn't installed, so the scripts call `docker-compose` (Homebrew binary) instead.
-
-> **Note on ports:** this project's Postgres listens on **5433**, not 5432, because your existing `postgres` container already uses 5432. The scaffold does not touch that container. `DATABASE_URL` in `.env` points at 5433.
+> **Note on the database:** the app uses your existing `postgres` container (`pgvector/pgvector:pg18`) on **5432**, database `mastiskadb`. `DATABASE_URL` in `.env` points there.
 
 ---
 
 ## 3. Folder structure
 
 ```
-read-later/
+mastiska-be/
 ├── plan.md                    Your learning plan (unchanged)
 ├── HANDCODE.md                Index of every HAND-CODE seam + scaffold decisions to review
 ├── handoff.md                 This file
 ├── README.md                  Short setup / scripts / API reference (replaced the Nest boilerplate)
-├── docker-compose.yml         Postgres (pgvector/pgvector:pg17) on 5433, Redis 7 on 6379
 ├── .env.example               Template env vars (committed)
 ├── .env                       Your local env (git-ignored)
-├── package.json               Scripts incl. migration:* and db:up
+├── package.json               Scripts incl. migration:*
 ├── pnpm-workspace.yaml        pnpm build-script allowlist (see §8)
 ├── src/
 │   ├── main.ts                Bootstraps Nest, applies configureApp(), mounts Swagger at /docs
@@ -188,7 +184,7 @@ pnpm migration:revert
 
 - **Always read generated migrations.** TypeORM sometimes emits redundant indexes. For example, the initial migration has single-column indexes on `bookmark_tags.bookmark_id`, which the composite PK already covers. Removing that is your call.
 - **Shared config:** `src/database/data-source.ts` is used by both the Nest app and the CLI, so the entity and migration globs live in one place.
-- **pgvector:** the extension is available in the image but **not enabled**. Add `CREATE EXTENSION IF NOT EXISTS vector` in the first migration that needs it.
+- **pgvector:** the extension is available in your container image but **not enabled**. Add `CREATE EXTENSION IF NOT EXISTS vector` in the first migration that needs it.
 
 ---
 
@@ -297,7 +293,7 @@ Search the code for `HAND-CODE`. Each seam is listed here in the order of `plan.
 |---|---|
 | 1. Domain & invariants | `src/bookmarks/bookmark.entity.ts` (doc comment). Decide on the resource identity model, the processing-state column, and the content/metadata tables. |
 | 3. URL ingestion | Create a new `src/ingestion/` module. Hook it up in `BookmarksService.create` (HAND-CODE comment). Implement `BookmarkIdentityService.canonicalize()` and add the `canonical_url` unique constraint. |
-| 4. Async processing | Redis is already running on 6379. Install `bullmq` / `@nestjs/bullmq` and register queues; the business rules are yours. |
+| 4. Async processing | Redis isn't provisioned yet: run one locally, then install `bullmq` / `@nestjs/bullmq` and register queues; the business rules are yours. |
 | 2C. Concurrency | `BookmarksService.update` and `NotesService.update` (both read-modify-write today). Collection and tag ownership integrity is in `collection.entity.ts`. |
 | 5. Chunking/embeddings | Enable `vector` in a migration and add chunk tables. |
 | 6–8. Retrieval, agent, reliability | Nothing exists yet. |
@@ -314,6 +310,6 @@ Search the code for `HAND-CODE`. Each seam is listed here in the order of `plan.
 ## 11. Current state of the repo
 
 - **Git:** nothing is committed. Everything is untracked on `main`, which has no commits yet.
-- **Local DB:** the `read-later-postgres-1` and `read-later-redis-1` containers are running. The migration has been applied, and the DB contains test users and bookmarks left by the e2e runs.
-- **Clean slate:** to start fresh, run `docker-compose down -v && pnpm db:up && pnpm migration:run`.
+- **Local DB:** the `mastiskadb` database in your `postgres` container (port 5432). The migration has been applied, and the DB contains test users and bookmarks left by the e2e runs.
+- **Clean slate:** drop and recreate `mastiskadb`, then run `pnpm migration:run`.
 - **Ignored files:** `.env` is git-ignored. `.env.example` is safe to commit.

@@ -23,8 +23,7 @@
     "migration:generate": "pnpm typeorm migration:generate",
     "migration:create": "typeorm-ts-node-commonjs migration:create",
     "migration:run": "pnpm typeorm migration:run",
-    "migration:revert": "pnpm typeorm migration:revert",
-    "db:up": "docker-compose up -d"
+    "migration:revert": "pnpm typeorm migration:revert"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

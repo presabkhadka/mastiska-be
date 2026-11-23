@@ -7,10 +7,10 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 
 /**
- * Runs against the real database from .env (docker-compose up -d && pnpm migration:run).
+ * Runs against the real database from .env (run `pnpm migration:run` first).
  * Each run registers fresh users, so it doesn't need a clean DB.
  */
-describe('Read Later API (e2e)', () => {
+describe('Mastiska API (e2e)', () => {
   let app: INestApplication<App>;
   let http: () => ReturnType<typeof request>;
   let tokenA: string;
