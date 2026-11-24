@@ -1,6 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { CollectionsService } from '../collections/collections.service';
 import { isUniqueViolation } from '../common/db-errors';
 import { paginate, Paginated } from '../common/dto/paginated.dto';
@@ -87,13 +91,21 @@ export class BookmarksService {
    * ingestion belong here once identity rules and job lifecycle are defined.
    */
   async create(userId: string, dto: CreateBookmarkDto): Promise<Bookmark> {
-    const bookmark = this.bookmarks.create({
-      userId,
-      originalUrl: dto.url,
-      canonicalUrl: this.identity.canonicalize(dto.url),
-      title: dto.title ?? null,
-    });
-    return this.bookmarks.save(bookmark);
+    try {
+      const bookmark = this.bookmarks.create({
+        userId,
+        originalUrl: dto.url,
+        canonicalUrl: this.identity.canonicalize(dto.url),
+        title: dto.title ?? null,
+      });
+      return await this.bookmarks.save(bookmark);
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      return await this.bookmarks.findOneByOrFail({
+        userId,
+        canonicalUrl: this.identity.canonicalize(dto.url),
+      });
+    }
   }
 
   /**
