@@ -26,6 +26,9 @@ import { User } from '../users/user.entity';
  */
 @Entity('bookmarks')
 @Index('idx_bookmarks_user_created', ['userId', 'createdAt'])
+@Index('uq_bookmarks_user_canonical', ['userId', 'canonicalUrl'], {
+  unique: true,
+})
 export class Bookmark extends BaseEntity {
   @Column({ name: 'user_id', type: 'uuid' })
   userId: string;
