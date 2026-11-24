@@ -16,6 +16,10 @@ export interface AuthResponse {
   user: { id: string; email: string; displayName: string | null };
 }
 
+export interface RegisterResponse {
+  message: string;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -23,18 +27,16 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
-  async register(dto: RegisterDto): Promise<AuthResponse> {
+  async register(dto: RegisterDto): Promise<RegisterResponse> {
     const passwordHash = await argon2.hash(dto.password);
     try {
-      const user = await this.users.create({ ...dto, passwordHash });
-      return this.issue(user);
+      await this.users.create({ ...dto, passwordHash });
     } catch (err) {
-      // Rely on the unique constraint rather than a check-then-insert.
-      if (isUniqueViolation(err)) {
-        throw new ConflictException('Email already registered');
-      }
-      throw err;
+      if (!isUniqueViolation(err)) throw err;
     }
+    return {
+      message: 'Successfully registered',
+    };
   }
 
   async login(dto: LoginDto): Promise<AuthResponse> {
