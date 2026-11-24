@@ -33,6 +33,7 @@ describe('BookmarksService', () => {
     findOneByOrFail: jest.fn(),
     delete: jest.fn(),
     update: jest.fn<Promise<{ affected: number }>, [object, object]>(),
+    query: jest.fn<Promise<unknown>, [string, unknown[]]>(),
     createQueryBuilder: jest.fn(() => ({
       relation: jest.fn(() => relationBuilder),
       update: jest.fn(() => updateBuilder),
@@ -222,17 +223,30 @@ describe('BookmarksService', () => {
     );
   });
 
-  it('addTag is idempotent on unique violation', async () => {
+  it('addTag inserts the link with the owner and ignores existing links', async () => {
     repo.existsBy.mockResolvedValue(true);
     tags.findOne.mockResolvedValue({ id: 't1' });
-    relationBuilder.add.mockRejectedValue(
+    repo.query.mockResolvedValue([]);
+    await expect(service.addTag('u1', 'b1', 't1')).resolves.toBeUndefined();
+    const [sql, params] = repo.query.mock.calls[0];
+    expect(sql).toContain('INSERT INTO bookmark_tags');
+    expect(sql).toContain('ON CONFLICT DO NOTHING');
+    expect(params).toEqual(['b1', 't1', 'u1']);
+  });
+
+  it('addTag returns 404 when the tag is deleted between check and insert', async () => {
+    repo.existsBy.mockResolvedValue(true);
+    tags.findOne.mockResolvedValue({ id: 't1' });
+    repo.query.mockRejectedValue(
       new QueryFailedError(
         '',
         [],
-        Object.assign(new Error(), { code: '23505' }),
+        Object.assign(new Error(), { code: '23503' }),
       ),
     );
-    await expect(service.addTag('u1', 'b1', 't1')).resolves.toBeUndefined();
+    await expect(service.addTag('u1', 'b1', 't1')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('addTag rejects a tag owned by someone else', async () => {
@@ -241,6 +255,6 @@ describe('BookmarksService', () => {
     await expect(service.addTag('u1', 'b1', 't1')).rejects.toBeInstanceOf(
       NotFoundException,
     );
-    expect(relationBuilder.add).not.toHaveBeenCalled();
+    expect(repo.query).not.toHaveBeenCalled();
   });
 });

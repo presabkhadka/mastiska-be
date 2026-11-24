@@ -1,6 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { isUniqueViolation } from '../common/db-errors';
 import { paginate, Paginated } from '../common/dto/paginated.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Collection } from './collection.entity';
@@ -33,7 +38,7 @@ export class CollectionsService {
   }
 
   create(userId: string, dto: CreateCollectionDto): Promise<Collection> {
-    return this.collections.save(this.collections.create({ ...dto, userId }));
+    return this.saveOrConflict(this.collections.create({ ...dto, userId }));
   }
 
   async update(
@@ -42,11 +47,22 @@ export class CollectionsService {
     dto: UpdateCollectionDto,
   ): Promise<Collection> {
     const c = await this.findOne(userId, id);
-    return this.collections.save(this.collections.merge(c, dto));
+    return this.saveOrConflict(this.collections.merge(c, dto));
   }
 
   async remove(userId: string, id: string): Promise<void> {
     const res = await this.collections.delete({ id, userId });
     if (!res.affected) throw new NotFoundException('Collection not found');
+  }
+
+  private async saveOrConflict(c: Collection): Promise<Collection> {
+    try {
+      return await this.collections.save(c);
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        throw new ConflictException(`Collection "${c.name}" already exists`);
+      }
+      throw err;
+    }
   }
 }

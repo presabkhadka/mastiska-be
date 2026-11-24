@@ -323,6 +323,52 @@ describe('Assistant (e2e, scripted model)', () => {
     expect(await collectionsNamed(userAId, name)).toHaveLength(1);
   });
 
+  it('refuses a collection name the user already has, before and after approval', async () => {
+    const name = `Taken ${randomUUID()}`;
+    await http()
+      .post('/collections')
+      .set(auth(tokenA))
+      .send({ name })
+      .expect(201);
+    fake.script(
+      callTool('createCollection', { name: name.toUpperCase() }),
+      text('You already have it.'),
+    );
+    const conv = await conversation(tokenA);
+    const res = await send(tokenA, conv, 'make one').expect(200);
+    expect(turn(res).pendingApprovals).toHaveLength(0);
+    expect(turn(res).toolCalls[0]).toMatchObject({
+      status: 'failed',
+      error: expect.stringContaining('already exists') as unknown,
+    });
+
+    // Name taken while the call waits for approval: the approval fails cleanly, no duplicate.
+    const late = `Late ${randomUUID()}`;
+    fake.script(
+      callTool('createCollection', { name: late, bookmarkIds: [bookmarkA1] }),
+      text('It already existed.'),
+    );
+    const conv2 = await conversation(tokenA);
+    const paused = await send(tokenA, conv2, 'make one').expect(200);
+    await http()
+      .post('/collections')
+      .set(auth(tokenA))
+      .send({ name: late })
+      .expect(201);
+    const callId = turn(paused).pendingApprovals[0].toolCallId;
+    const approved = await http()
+      .post(`/conversations/${conv2}/tool-calls/${callId}/approve`)
+      .set(auth(tokenA))
+      .expect(200);
+    expect(turn(approved).toolCalls[0]).toMatchObject({
+      status: 'failed',
+      error: expect.stringContaining('already exists') as unknown,
+    });
+    expect(await collectionsNamed(userAId, late)).toEqual([
+      { id: expect.any(String) as unknown, n: 0 },
+    ]);
+  });
+
   it('returns the original run for a retried clientMessageId', async () => {
     fake.script(text('Once.'));
     const conv = await conversation(tokenA);

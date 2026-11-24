@@ -1,4 +1,11 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  VersionColumn,
+} from 'typeorm';
 import { Bookmark } from '../bookmarks/bookmark.entity';
 import { BaseEntity } from '../common/entities/base.entity';
 
@@ -15,4 +22,7 @@ export class Note extends BaseEntity {
 
   @Column({ type: 'text' })
   body: string;
+
+  @VersionColumn({ default: 1 })
+  version: number;
 }

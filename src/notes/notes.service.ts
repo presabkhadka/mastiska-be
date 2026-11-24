@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BookmarksService } from '../bookmarks/bookmarks.service';
@@ -36,25 +40,29 @@ export class NotesService {
     id: string,
     dto: UpdateNoteDto,
   ): Promise<Note> {
-    const note = await this.findOwned(userId, bookmarkId, id);
-    note.body = dto.body;
-    return this.notes.save(note);
+    await this.bookmarks.assertOwned(userId, bookmarkId);
+    const res = await this.notes
+      .createQueryBuilder()
+      .update(Note)
+      .set({ body: dto.body, version: () => 'version + 1' })
+      .where('id = :id AND bookmark_id = :bookmarkId AND version = :version', {
+        id,
+        bookmarkId,
+        version: dto.version,
+      })
+      .execute();
+    if (res.affected) return this.notes.findOneByOrFail({ id });
+    if (await this.notes.existsBy({ id, bookmarkId })) {
+      throw new ConflictException(
+        'Note was changed since you loaded it; reload and try again',
+      );
+    }
+    throw new NotFoundException('Note not found');
   }
 
   async remove(userId: string, bookmarkId: string, id: string): Promise<void> {
     await this.bookmarks.assertOwned(userId, bookmarkId);
     const res = await this.notes.delete({ id, bookmarkId });
     if (!res.affected) throw new NotFoundException('Note not found');
-  }
-
-  private async findOwned(
-    userId: string,
-    bookmarkId: string,
-    id: string,
-  ): Promise<Note> {
-    await this.bookmarks.assertOwned(userId, bookmarkId);
-    const note = await this.notes.findOneBy({ id, bookmarkId });
-    if (!note) throw new NotFoundException('Note not found');
-    return note;
   }
 }

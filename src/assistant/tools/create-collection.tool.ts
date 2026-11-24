@@ -73,42 +73,40 @@ export class CreateCollectionTool implements AssistantTool<CreateCollectionArgs>
   }
 
   async precheck(args: CreateCollectionArgs, ctx: ToolContext) {
-    const missing = await this.unownedIds(
-      this.dataSource.manager,
-      args,
-      ctx.userId,
-    );
+    const m = this.dataSource.manager;
+    if (await this.nameTaken(m, args.name, ctx.userId)) {
+      return `A collection named "${args.name}" already exists`;
+    }
+    const missing = await this.unownedIds(m, args, ctx.userId);
     return missing.length ? `Bookmarks not found: ${missing.join(', ')}` : null;
   }
 
   async execute(args: CreateCollectionArgs, ctx: ToolContext) {
     const m = ctx.manager ?? this.dataSource.manager;
     // Re-checked inside the approval transaction: a bookmark may have been deleted meanwhile.
-    const missing = await this.unownedIds(m, args, ctx.userId);
+    const missing = await this.unownedIds(m, args, ctx.userId, !!ctx.manager);
     if (missing.length)
       throw new ToolError(`Bookmarks not found: ${missing.join(', ')}`);
 
-    const collection = await m.save(
-      m.create(Collection, {
-        userId: ctx.userId,
-        name: args.name,
-        description: args.description ?? null,
-      }),
+    // ON CONFLICT instead of catching: a unique violation would abort the approval transaction.
+    const inserted = await m.query<{ id: string; name: string }[]>(
+      `INSERT INTO collections (user_id, name, description) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, lower(name)) DO NOTHING
+       RETURNING id, name`,
+      [ctx.userId, args.name, args.description ?? null],
     );
+    const collection = inserted[0];
+    if (!collection) {
+      throw new ToolError(`A collection named "${args.name}" already exists`);
+    }
     const ids = args.bookmarkIds ?? [];
     if (ids.length) {
-      await m
-        .createQueryBuilder()
-        .insert()
-        .into('bookmark_collections')
-        .values(
-          ids.map((bookmarkId) => ({
-            bookmark_id: bookmarkId,
-            collection_id: collection.id,
-          })),
-        )
-        .orIgnore()
-        .execute();
+      await m.query(
+        `INSERT INTO bookmark_collections (bookmark_id, collection_id, user_id)
+         SELECT unnest($1::uuid[]), $2, $3
+         ON CONFLICT DO NOTHING`,
+        [ids, collection.id, ctx.userId],
+      );
     }
     return {
       collectionId: collection.id,
@@ -117,16 +115,29 @@ export class CreateCollectionTool implements AssistantTool<CreateCollectionArgs>
     };
   }
 
+  private nameTaken(m: EntityManager, name: string, userId: string) {
+    return m
+      .createQueryBuilder(Collection, 'c')
+      .where('c.user_id = :userId AND lower(c.name) = lower(:name)', {
+        userId,
+        name,
+      })
+      .getExists();
+  }
+
   private async unownedIds(
     m: EntityManager,
     args: CreateCollectionArgs,
     userId: string,
+    lock = false,
   ) {
     const ids = args.bookmarkIds ?? [];
     if (!ids.length) return [];
+    // FOR SHARE inside the approval transaction: a concurrent delete waits instead of breaking the link insert.
     const owned = await m.find(Bookmark, {
       where: { id: In(ids), userId },
       select: { id: true },
+      ...(lock && { lock: { mode: 'pessimistic_read' as const } }),
     });
     const ownedIds = new Set(owned.map((b) => b.id));
     return ids.filter((id) => !ownedIds.has(id));

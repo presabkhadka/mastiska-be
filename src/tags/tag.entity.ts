@@ -12,6 +12,7 @@ import { User } from '../users/user.entity';
 
 @Entity('tags')
 @Unique('uq_tags_user_name', ['userId', 'name'])
+@Unique('uq_tags_id_user', ['id', 'userId'])
 export class Tag extends BaseEntity {
   @Column({ name: 'user_id', type: 'uuid' })
   userId: string;

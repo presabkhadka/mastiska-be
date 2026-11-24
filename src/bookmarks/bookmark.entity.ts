@@ -7,6 +7,7 @@ import {
   ManyToMany,
   ManyToOne,
   OneToMany,
+  Unique,
 } from 'typeorm';
 import { BaseEntity } from '../common/entities/base.entity';
 import { ProcessingState } from '../ingestion/processing-state';
@@ -26,6 +27,8 @@ import { User } from '../users/user.entity';
 @Index('uq_bookmarks_user_canonical', ['userId', 'canonicalUrl'], {
   unique: true,
 })
+// Target of the composite FKs that keep tag/collection links within one owner.
+@Unique('uq_bookmarks_id_user', ['id', 'userId'])
 export class Bookmark extends BaseEntity {
   @Column({ name: 'user_id', type: 'uuid' })
   userId: string;
@@ -76,6 +79,8 @@ export class Bookmark extends BaseEntity {
   @ManyToMany(() => Tag, (tag) => tag.bookmarks)
   @JoinTable({
     name: 'bookmark_tags',
+    // Has an extra user_id column + composite FKs (migration AddOwnershipConstraints).
+    synchronize: false,
     joinColumn: { name: 'bookmark_id', referencedColumnName: 'id' },
     inverseJoinColumn: { name: 'tag_id', referencedColumnName: 'id' },
   })
@@ -84,6 +89,7 @@ export class Bookmark extends BaseEntity {
   @ManyToMany(() => Collection, (c) => c.bookmarks)
   @JoinTable({
     name: 'bookmark_collections',
+    synchronize: false,
     joinColumn: { name: 'bookmark_id', referencedColumnName: 'id' },
     inverseJoinColumn: { name: 'collection_id', referencedColumnName: 'id' },
   })

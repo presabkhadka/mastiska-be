@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { DataSource } from 'typeorm';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
@@ -198,5 +199,102 @@ describe('Mastiska API (e2e)', () => {
       .get(`/bookmarks/${bookmarkId}/notes`)
       .set(auth(tokenA))
       .expect(404);
+  });
+
+  it('enforces collection names, note versions and link ownership', async () => {
+    const created = await http()
+      .post('/collections')
+      .set(auth(tokenA))
+      .send({ name: 'Postgres internals' })
+      .expect(201);
+    await http()
+      .post('/collections')
+      .set(auth(tokenA))
+      .send({ name: '  postgres INTERNALS ' })
+      .expect(409);
+    const other = await http()
+      .post('/collections')
+      .set(auth(tokenA))
+      .send({ name: 'Queues' })
+      .expect(201);
+    await http()
+      .patch(`/collections/${(other.body as { id: string }).id}`)
+      .set(auth(tokenA))
+      .send({ name: 'POSTGRES internals' })
+      .expect(409);
+    // Another user may reuse the name.
+    await http()
+      .post('/collections')
+      .set(auth(tokenB))
+      .send({ name: 'Postgres internals' })
+      .expect(201);
+
+    const bm = await http()
+      .post('/bookmarks')
+      .set(auth(tokenA))
+      .send({ url: `https://example.com/${randomUUID()}` })
+      .expect(201);
+    const bookmarkId = (bm.body as { id: string }).id;
+    const note = await http()
+      .post(`/bookmarks/${bookmarkId}/notes`)
+      .set(auth(tokenA))
+      .send({ body: 'v1' })
+      .expect(201);
+    const noteId = (note.body as { id: string; version: number }).id;
+    expect(note.body).toMatchObject({ version: 1 });
+    const notePath = `/bookmarks/${bookmarkId}/notes/${noteId}`;
+    const v2 = await http()
+      .patch(notePath)
+      .set(auth(tokenA))
+      .send({ body: 'v2', version: 1 })
+      .expect(200);
+    expect(v2.body).toMatchObject({ body: 'v2', version: 2 });
+    await http()
+      .patch(notePath)
+      .set(auth(tokenA))
+      .send({ body: 'stale edit', version: 1 })
+      .expect(409);
+    await http()
+      .patch(notePath)
+      .set(auth(tokenA))
+      .send({ body: 'no version' })
+      .expect(400);
+    await http()
+      .patch(`/bookmarks/${bookmarkId}/notes/${randomUUID()}`)
+      .set(auth(tokenA))
+      .send({ body: 'x', version: 1 })
+      .expect(404);
+    const notes = await http()
+      .get(`/bookmarks/${bookmarkId}/notes`)
+      .set(auth(tokenA))
+      .expect(200);
+    expect(notes.body).toMatchObject([{ body: 'v2', version: 2 }]);
+
+    // The DB itself rejects a link between different owners' rows.
+    const tagB = await http()
+      .post('/tags')
+      .set(auth(tokenB))
+      .send({ name: `t-${randomUUID().slice(0, 8)}` })
+      .expect(201);
+    const tagBId = (tagB.body as { id: string }).id;
+    const db = app.get(DataSource);
+    const [{ user_id: ownerA }] = await db.query<{ user_id: string }[]>(
+      'SELECT user_id FROM bookmarks WHERE id = $1',
+      [bookmarkId],
+    );
+    for (const owner of [ownerA, null]) {
+      await expect(
+        db.query(
+          'INSERT INTO bookmark_tags (bookmark_id, tag_id, user_id) VALUES ($1, $2, $3)',
+          [bookmarkId, tagBId, owner],
+        ),
+      ).rejects.toThrow(/foreign key|null value/);
+    }
+    await expect(
+      db.query(
+        'INSERT INTO bookmark_collections (bookmark_id, collection_id, user_id) SELECT $1, id, user_id FROM collections WHERE id = $2',
+        [bookmarkId, (created.body as { id: string }).id],
+      ),
+    ).resolves.toBeDefined();
   });
 });

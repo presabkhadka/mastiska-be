@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsInt, IsNotEmpty, IsString, MaxLength, Min } from 'class-validator';
 
 export class CreateNoteDto {
   @ApiProperty({ maxLength: 20000 })
@@ -9,4 +9,12 @@ export class CreateNoteDto {
   body: string;
 }
 
-export class UpdateNoteDto extends CreateNoteDto {}
+export class UpdateNoteDto extends CreateNoteDto {
+  @ApiProperty({
+    description: 'The version you last read; a stale version returns 409.',
+    example: 1,
+  })
+  @IsInt()
+  @Min(1)
+  version: number;
+}

@@ -7,7 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, QueryDeepPartialEntity, Repository } from 'typeorm';
 import { CollectionsService } from '../collections/collections.service';
-import { isUniqueViolation } from '../common/db-errors';
+import { isForeignKeyViolation, isUniqueViolation } from '../common/db-errors';
 import { paginate, Paginated } from '../common/dto/paginated.dto';
 import {
   assertTransition,
@@ -223,7 +223,7 @@ export class BookmarksService {
   async addTag(userId: string, bookmarkId: string, tagId: string) {
     await this.assertOwned(userId, bookmarkId);
     await this.tags.findOne(userId, tagId);
-    await this.relate('tags', bookmarkId, tagId);
+    await this.relate('tags', userId, bookmarkId, tagId);
   }
 
   async removeTag(userId: string, bookmarkId: string, tagId: string) {
@@ -239,7 +239,7 @@ export class BookmarksService {
   ) {
     await this.collections.findOne(userId, collectionId);
     await this.assertOwned(userId, bookmarkId);
-    await this.relate('collections', bookmarkId, collectionId);
+    await this.relate('collections', userId, bookmarkId, collectionId);
   }
 
   async removeFromCollection(
@@ -252,20 +252,31 @@ export class BookmarksService {
     await this.unrelate('collections', bookmarkId, collectionId);
   }
 
+  // Composite FKs reject links across owners and rows deleted since the checks above.
   private async relate(
     relation: 'tags' | 'collections',
+    userId: string,
     bookmarkId: string,
     otherId: string,
   ) {
+    const [table, column] =
+      relation === 'tags'
+        ? ['bookmark_tags', 'tag_id']
+        : ['bookmark_collections', 'collection_id'];
     try {
-      await this.bookmarks
-        .createQueryBuilder()
-        .relation(Bookmark, relation)
-        .of(bookmarkId)
-        .add(otherId);
+      await this.bookmarks.query(
+        `INSERT INTO ${table} (bookmark_id, ${column}, user_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [bookmarkId, otherId, userId],
+      );
     } catch (err) {
-      // Already linked: treat as success so PUT stays idempotent.
-      if (!isUniqueViolation(err)) throw err;
+      if (isForeignKeyViolation(err)) {
+        throw new NotFoundException(
+          relation === 'tags'
+            ? 'Bookmark or tag not found'
+            : 'Bookmark or collection not found',
+        );
+      }
+      throw err;
     }
   }
 
