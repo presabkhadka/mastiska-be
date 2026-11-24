@@ -1,6 +1,6 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable } from '@nestjs/common';
-import { Queue } from 'bullmq';
+import { JobsOptions, Queue } from 'bullmq';
 import {
   EMBED_QUEUE,
   embedJobId,
@@ -9,8 +9,17 @@ import {
   FETCH_QUEUE,
   fetchJobId,
   IngestionJobData,
+  REEMBED_JOB,
+  reembedJobId,
+  REFRESH_JOB_OPTIONS,
+  REFRESH_QUEUE,
+  refreshJobId,
   STAGE_JOB_OPTIONS,
 } from './ingestion-queue.constants';
+
+// BullMQ: lower number = higher priority. Manual refreshes jump ahead of scheduled ones.
+export const MANUAL_REFRESH_PRIORITY = 1;
+export const SCHEDULED_REFRESH_PRIORITY = 10;
 
 const ENQUEUE_TIMEOUT_MS = 2_000;
 
@@ -23,6 +32,8 @@ export class IngestionQueue {
     private readonly extractQueue: Queue<IngestionJobData>,
     @InjectQueue(EMBED_QUEUE)
     private readonly embedQueue: Queue<IngestionJobData>,
+    @InjectQueue(REFRESH_QUEUE)
+    private readonly refreshQueue: Queue<IngestionJobData>,
   ) {}
 
   // jobId dedups: adding while a job for this bookmark/stage exists is a no-op.
@@ -38,12 +49,41 @@ export class IngestionQueue {
     return this.add(this.embedQueue, embedJobId(bookmarkId), bookmarkId);
   }
 
+  enqueueReembed(bookmarkId: string): Promise<void> {
+    return this.add(this.embedQueue, reembedJobId(bookmarkId), bookmarkId, {
+      name: REEMBED_JOB,
+    });
+  }
+
+  enqueueManualRefresh(bookmarkId: string): Promise<void> {
+    return this.add(this.refreshQueue, refreshJobId(bookmarkId), bookmarkId, {
+      ...REFRESH_JOB_OPTIONS,
+      priority: MANUAL_REFRESH_PRIORITY,
+    });
+  }
+
+  async enqueueScheduledRefreshes(bookmarkIds: string[]): Promise<void> {
+    await this.refreshQueue.addBulk(
+      bookmarkIds.map((bookmarkId) => ({
+        name: REFRESH_QUEUE,
+        data: { bookmarkId },
+        opts: {
+          ...REFRESH_JOB_OPTIONS,
+          jobId: refreshJobId(bookmarkId),
+          priority: SCHEDULED_REFRESH_PRIORITY,
+        },
+      })),
+    );
+  }
+
   // Bounded so a Redis outage can't hang the API; the sweeper re-enqueues.
   private async add(
     queue: Queue<IngestionJobData>,
     jobId: string,
     bookmarkId: string,
+    opts: JobsOptions & { name?: string } = {},
   ): Promise<void> {
+    const { name, ...jobOpts } = opts;
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -53,7 +93,11 @@ export class IngestionQueue {
     });
     try {
       await Promise.race([
-        queue.add(queue.name, { bookmarkId }, { ...STAGE_JOB_OPTIONS, jobId }),
+        queue.add(
+          name ?? queue.name,
+          { bookmarkId },
+          { ...STAGE_JOB_OPTIONS, ...jobOpts, jobId },
+        ),
         timeout,
       ]);
     } finally {

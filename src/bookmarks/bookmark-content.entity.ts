@@ -1,6 +1,7 @@
 import {
   Column,
   CreateDateColumn,
+  Index,
   Entity,
   JoinColumn,
   OneToOne,
@@ -70,6 +71,42 @@ export class BookmarkContent {
 
   @Column({ name: 'extracted_at', type: 'timestamptz', nullable: true })
   extractedAt: Date | null;
+
+  // --- Refresh (re-fetching changed pages) ---
+
+  /** sha256 of text_content; a refresh compares it to detect a change. */
+  @Column({ name: 'content_hash', type: 'char', length: 64, nullable: true })
+  contentHash: string | null;
+
+  @Column({ type: 'text', nullable: true, select: false })
+  etag: string | null;
+
+  @Column({
+    name: 'last_modified',
+    type: 'text',
+    nullable: true,
+    select: false,
+  })
+  lastModified: string | null;
+
+  @Column({ name: 'checked_at', type: 'timestamptz', nullable: true })
+  checkedAt: Date | null;
+
+  @Index('idx_bookmark_contents_next_check')
+  @Column({ name: 'next_check_at', type: 'timestamptz', nullable: true })
+  nextCheckAt: Date | null;
+
+  @Column({ name: 'refresh_interval_hours', type: 'int', default: 12 })
+  refreshIntervalHours: number;
+
+  @Column({ name: 'refresh_failures', type: 'int', default: 0 })
+  refreshFailures: number;
+
+  @Column({ name: 'last_refresh_error', type: 'text', nullable: true })
+  lastRefreshError: string | null;
+
+  @Column({ name: 'content_changed_at', type: 'timestamptz', nullable: true })
+  contentChangedAt: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, LessThan, Repository } from 'typeorm';
 import { BookmarkChunk } from '../bookmarks/bookmark-chunk.entity';
@@ -61,6 +62,25 @@ export const ORPHAN_AFTER_MS = 2 * 60_000;
 const SWEEP_BATCH = 100;
 export const EMBED_BATCH = 50;
 
+// Adaptive refresh: unchanged pages are checked half as often each time, up to 30 days.
+export const REFRESH_BASE_HOURS = 12;
+export const REFRESH_MAX_HOURS = 720;
+export const REFRESH_MAX_FAILURES = 5;
+const REFRESH_ENQUEUE_CHUNK = 100;
+
+export type RefreshOutcome = 'unchanged' | 'changed' | 'failed' | 'skipped';
+
+export const textHash = (text: string) =>
+  createHash('sha256').update(text, 'utf8').digest('hex');
+
+const freshSchedule = (now: Date) => ({
+  checkedAt: now,
+  nextCheckAt: new Date(now.getTime() + REFRESH_BASE_HOURS * 3_600_000),
+  refreshIntervalHours: REFRESH_BASE_HOURS,
+  refreshFailures: 0,
+  lastRefreshError: null,
+});
+
 /** The row left this worker's stage mid-work (reset by sweeper or reprocessed). */
 class LostClaimError extends Error {}
 
@@ -105,6 +125,8 @@ export class IngestionService {
             contentType: page.contentType.slice(0, 255),
             rawHtml: stripNul(page.html),
             fetchedAt: new Date(),
+            etag: page.etag,
+            lastModified: page.lastModified,
           },
           ['bookmarkId'],
         );
@@ -132,10 +154,16 @@ export class IngestionService {
         return { article, chunks: chunkArticle(article.contentHtml) };
       },
       async (m, { article, chunks }) => {
+        const now = new Date();
         await m.update(
           BookmarkContent,
           { bookmarkId },
-          { ...article, extractedAt: new Date() },
+          {
+            ...article,
+            extractedAt: now,
+            contentHash: textHash(article.textContent),
+            ...freshSchedule(now),
+          },
         );
         await this.replaceChunks(m, bookmarkId, article.title, chunks);
         // Fill the title only if the user didn't set one.
@@ -158,7 +186,7 @@ export class IngestionService {
       bookmarkId,
       EMBED_STAGE,
       attempt,
-      () => this.embedPendingChunks(bookmarkId),
+      () => this.embedPendingChunks(bookmarkId, S.Embedding),
       async (m) => {
         const remaining = await this.pendingChunks(m, bookmarkId).getCount();
         if (remaining > 0) {
@@ -203,6 +231,173 @@ export class IngestionService {
     if (!committed) return 'skipped';
     this.logger.log(`${stage.name} done for ${bookmarkId}`);
     return 'done';
+  }
+
+  /**
+   * Re-fetches a ready bookmark without taking it out of search. Unchanged → only the
+   * check is recorded; changed → content and chunks are swapped in one transaction;
+   * failure → the old content stays and the error is recorded.
+   */
+  async refresh(bookmarkId: string): Promise<RefreshOutcome> {
+    const b = await this.bookmarks.findOne({
+      where: { id: bookmarkId },
+      select: { id: true, originalUrl: true, processingState: true },
+    });
+    if (b?.processingState !== S.Ready) return 'skipped';
+    const prev = await this.contents.findOne({
+      where: { bookmarkId },
+      select: {
+        bookmarkId: true,
+        contentHash: true,
+        etag: true,
+        lastModified: true,
+        refreshIntervalHours: true,
+        refreshFailures: true,
+      },
+    });
+    if (!prev) return 'skipped';
+
+    try {
+      const page = await this.fetcher.fetchIfChanged(b.originalUrl, prev);
+      if ('notModified' in page) {
+        await this.recordCheck(prev, 'unchanged');
+        return 'unchanged';
+      }
+      const article = this.extractor.extract(page.html, page.finalUrl);
+      const hash = textHash(article.textContent);
+      const validators = { etag: page.etag, lastModified: page.lastModified };
+      if (hash === prev.contentHash) {
+        await this.recordCheck(prev, 'unchanged', validators);
+        return 'unchanged';
+      }
+
+      const chunks = chunkArticle(article.contentHtml);
+      const committed = await this.dataSource.transaction(async (m) => {
+        // A reprocess or delete that started meanwhile wins.
+        const row = await m.findOne(Bookmark, {
+          where: { id: bookmarkId },
+          select: { id: true, processingState: true },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (row?.processingState !== S.Ready) return false;
+        const now = new Date();
+        await m.update(
+          BookmarkContent,
+          { bookmarkId },
+          {
+            finalUrl: page.finalUrl,
+            httpStatus: page.status,
+            contentType: page.contentType.slice(0, 255),
+            rawHtml: stripNul(page.html),
+            fetchedAt: now,
+            ...validators,
+            ...article,
+            extractedAt: now,
+            contentHash: hash,
+            contentChangedAt: now,
+            ...freshSchedule(now),
+          },
+        );
+        await this.replaceChunks(m, bookmarkId, article.title, chunks);
+        if (article.title) {
+          await m
+            .createQueryBuilder()
+            .update(Bookmark)
+            .set({ title: article.title })
+            .where('id = :id AND title IS NULL', { id: bookmarkId })
+            .execute();
+        }
+        return true;
+      });
+      if (!committed) return 'skipped';
+
+      const missing = await this.pendingChunks(
+        this.dataSource.manager,
+        bookmarkId,
+      ).getCount();
+      if (missing > 0) {
+        try {
+          await this.queue.enqueueReembed(bookmarkId);
+        } catch (err) {
+          this.logger.warn(
+            `Failed to enqueue reembed for ${bookmarkId}: ${errorMessage(err)}`,
+          );
+        }
+      }
+      this.logger.log(
+        `refresh: ${bookmarkId} changed, ${missing} chunks to embed`,
+      );
+      return 'changed';
+    } catch (err) {
+      const message = errorMessage(err);
+      await this.recordCheck(prev, 'failed', {}, message);
+      this.logger.warn(`refresh failed for ${bookmarkId}: ${message}`);
+      return 'failed';
+    }
+  }
+
+  /** Embeds chunks a refresh added; the bookmark stays ready (searchable) meanwhile. */
+  async reembed(bookmarkId: string): Promise<StageOutcome> {
+    try {
+      await this.embedPendingChunks(bookmarkId, S.Ready);
+    } catch (err) {
+      if (err instanceof LostClaimError) return 'skipped';
+      throw err;
+    }
+    return 'done';
+  }
+
+  /**
+   * Picks due auto-refresh bookmarks, at most `perUser` per user and `total` overall,
+   * round-robin across users; leftovers stay due for the next run.
+   */
+  async planRefreshes(total: number, perUser: number): Promise<number> {
+    const rows = await this.dataSource.query<{ id: string }[]>(
+      `SELECT id FROM (
+         SELECT b.id, c.next_check_at,
+                row_number() OVER (PARTITION BY b.user_id ORDER BY c.next_check_at, b.id) AS rn
+         FROM bookmarks b
+         JOIN bookmark_contents c ON c.bookmark_id = b.id
+         WHERE b.auto_refresh AND b.processing_state = 'ready' AND c.next_check_at <= now()
+       ) due
+       WHERE rn <= $1
+       ORDER BY rn, next_check_at
+       LIMIT $2`,
+      [perUser, total],
+    );
+    const ids = rows.map((r) => r.id);
+    for (let i = 0; i < ids.length; i += REFRESH_ENQUEUE_CHUNK) {
+      await this.queue.enqueueScheduledRefreshes(
+        ids.slice(i, i + REFRESH_ENQUEUE_CHUNK),
+      );
+    }
+    this.logger.log(`refresh plan: queued ${ids.length} bookmarks`);
+    return ids.length;
+  }
+
+  private async recordCheck(
+    prev: BookmarkContent,
+    result: 'unchanged' | 'failed',
+    validators: Partial<Pick<BookmarkContent, 'etag' | 'lastModified'>> = {},
+    error: string | null = null,
+  ): Promise<void> {
+    const now = new Date();
+    const interval = Math.min(prev.refreshIntervalHours * 2, REFRESH_MAX_HOURS);
+    const failures = result === 'failed' ? prev.refreshFailures + 1 : 0;
+    const giveUp = failures >= REFRESH_MAX_FAILURES;
+    await this.contents.update(
+      { bookmarkId: prev.bookmarkId },
+      {
+        ...validators,
+        checkedAt: now,
+        refreshIntervalHours: interval,
+        refreshFailures: failures,
+        lastRefreshError: error,
+        nextCheckAt: giveUp
+          ? null
+          : new Date(now.getTime() + interval * 3_600_000),
+      },
+    );
   }
 
   /** Requeues stuck rows and rows whose job was lost. Run periodically. */
@@ -360,7 +555,10 @@ export class IngestionService {
    * Embeds missing vectors batch by batch, committing each batch, so a
    * failure midway only re-embeds the chunks that are still missing.
    */
-  private async embedPendingChunks(bookmarkId: string): Promise<void> {
+  private async embedPendingChunks(
+    bookmarkId: string,
+    requiredState: S,
+  ): Promise<void> {
     const content = await this.contents.findOne({
       where: { bookmarkId },
       select: { bookmarkId: true, title: true },
@@ -396,7 +594,7 @@ export class IngestionService {
           select: { id: true, processingState: true },
           lock: { mode: 'pessimistic_write' },
         });
-        if (row?.processingState !== S.Embedding) throw new LostClaimError();
+        if (row?.processingState !== requiredState) throw new LostClaimError();
         const now = new Date();
         for (const [i, c] of batch.entries()) {
           await m.update(

@@ -1,4 +1,4 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import * as argon2 from 'argon2';
@@ -23,7 +23,7 @@ describe('AuthService', () => {
     service = mod.get(AuthService);
   });
 
-  it('register hashes the password and returns a token', async () => {
+  it('register hashes the password and returns a generic message', async () => {
     users.create.mockImplementation((d: { passwordHash: string }) =>
       Promise.resolve({ id: 'u1', email: 'a@b.co', displayName: null, ...d }),
     );
@@ -36,13 +36,11 @@ describe('AuthService', () => {
     ];
     expect(passwordHash).not.toBe('secret123');
     expect(await argon2.verify(passwordHash, 'secret123')).toBe(true);
-    expect(res).toEqual({
-      accessToken: 'token',
-      user: { id: 'u1', email: 'a@b.co', displayName: null },
-    });
+    expect(res).toEqual({ message: 'Successfully registered' });
+    expect(jwt.signAsync).not.toHaveBeenCalled();
   });
 
-  it('register maps unique violation to 409', async () => {
+  it('register answers a taken email exactly like a new one', async () => {
     users.create.mockRejectedValue(
       new QueryFailedError(
         '',
@@ -52,7 +50,14 @@ describe('AuthService', () => {
     );
     await expect(
       service.register({ email: 'a@b.co', password: 'secret123' }),
-    ).rejects.toBeInstanceOf(ConflictException);
+    ).resolves.toEqual({ message: 'Successfully registered' });
+  });
+
+  it('register rethrows unexpected database errors', async () => {
+    users.create.mockRejectedValue(new Error('db down'));
+    await expect(
+      service.register({ email: 'a@b.co', password: 'secret123' }),
+    ).rejects.toThrow('db down');
   });
 
   it('login rejects unknown email and wrong password identically', async () => {

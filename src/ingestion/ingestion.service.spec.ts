@@ -221,6 +221,7 @@ describe('IngestionService', () => {
     extractor.extract.mockReturnValue({
       title: 'T',
       contentHtml: '<p>Hello there.</p>',
+      textContent: 'Hello there.',
     });
     manager.find.mockResolvedValue([
       { contentHash: chunkHash('T', null, 'Hello world.'), embedding: [1, 0] },

@@ -18,5 +18,6 @@
   },
   "transformIgnorePatterns": [
     "/node_modules/(?!(\\.pnpm/)?(boolbase|css-select|css-what|cssomnom|nth-check|htmlparser2|html-escaper|uhyphen|dom[a-z-]*|entities)[@/])"
-  ]
+  ],
+  "setupFiles": ["<rootDir>/support/e2e-env.ts"]
 }

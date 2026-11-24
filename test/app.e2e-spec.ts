@@ -18,9 +18,11 @@ describe('Mastiska API (e2e)', () => {
   let tokenB: string;
 
   const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+  const emails: string[] = [];
 
   async function register(): Promise<string> {
     const email = `e2e-${randomUUID()}@example.com`;
+    emails.push(email);
     await http()
       .post('/auth/register')
       .send({ email, password: 'password123' })
@@ -45,6 +47,9 @@ describe('Mastiska API (e2e)', () => {
   });
 
   afterAll(async () => {
+    await app
+      .get(DataSource)
+      .query('DELETE FROM users WHERE email = ANY($1)', [emails]);
     await app.close();
   });
 
@@ -54,14 +59,21 @@ describe('Mastiska API (e2e)', () => {
   it('rejects unauthenticated requests', () =>
     http().get('/bookmarks').expect(401));
 
-  it('rejects duplicate registration with 409', async () => {
+  it('answers duplicate registration like a new one and keeps the original password', async () => {
     const email = `e2e-${randomUUID()}@example.com`;
+    emails.push(email);
     const body = { email, password: 'password123' };
-    await http().post('/auth/register').send(body).expect(201);
-    await http()
+    const first = await http().post('/auth/register').send(body).expect(201);
+    const again = await http()
       .post('/auth/register')
-      .send({ ...body, email: email.toUpperCase() })
-      .expect(409);
+      .send({ email: email.toUpperCase(), password: 'attacker-pass' })
+      .expect(201);
+    expect(again.body).toEqual(first.body);
+    await http().post('/auth/login').send(body).expect(200);
+    await http()
+      .post('/auth/login')
+      .send({ email, password: 'attacker-pass' })
+      .expect(401);
   });
 
   it('validates input and strips unknown fields', async () => {

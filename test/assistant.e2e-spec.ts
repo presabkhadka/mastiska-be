@@ -1,5 +1,3 @@
-// Rate limits would otherwise cap how many turns a test user can send.
-import './support/no-assistant-rate-limit';
 import { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';

@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { isUniqueViolation } from '../common/db-errors';
@@ -32,6 +28,7 @@ export class AuthService {
     try {
       await this.users.create({ ...dto, passwordHash });
     } catch (err) {
+      // Same response for a taken email, so register can't be used to discover accounts.
       if (!isUniqueViolation(err)) throw err;
     }
     return {

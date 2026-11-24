@@ -1,8 +1,6 @@
 import {
   CanActivate,
   ExecutionContext,
-  HttpException,
-  HttpStatus,
   Injectable,
   mixin,
   Type,
@@ -11,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import type { AuthUser } from '../../auth/decorators/current-user.decorator';
 import { RateLimiter, RateWindow } from './rate-limiter';
+import { tooManyRequests } from './too-many-requests';
 
 /**
  * Per-user minute/day limits for an expensive endpoint.
@@ -54,17 +53,7 @@ export function UserRateLimitGuard(
       );
       if (decision.allowed) return true;
 
-      const retryAfter = Math.ceil(decision.retryAfterMs / 1000);
-      http.getResponse<Response>().setHeader('Retry-After', String(retryAfter));
-      throw new HttpException(
-        {
-          statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          error: 'Too Many Requests',
-          message: `Limit per ${decision.window} reached; try again in ${retryAfter}s`,
-          retryAfter,
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
+      throw tooManyRequests(http.getResponse<Response>(), decision);
     }
   }
   return mixin(Guard);

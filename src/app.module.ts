@@ -26,6 +26,7 @@ import { UsersModule } from './users/users.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         connection: { url: config.getOrThrow<string>('REDIS_URL') },
+        prefix: config.getOrThrow<string>('QUEUE_PREFIX'),
       }),
     }),
     UsersModule,

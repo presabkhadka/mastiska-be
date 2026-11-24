@@ -16,6 +16,18 @@ export interface FetchedPage {
   status: number;
   contentType: string;
   html: string;
+  etag: string | null;
+  lastModified: string | null;
+}
+
+/** Validators from a previous fetch, sent as If-None-Match / If-Modified-Since. */
+export interface Validators {
+  etag?: string | null;
+  lastModified?: string | null;
+}
+
+export interface NotModified {
+  notModified: true;
 }
 
 export interface SafeFetchOptions {
@@ -57,21 +69,38 @@ export class SafeFetcher {
   }
 
   async fetch(url: string): Promise<FetchedPage> {
+    return (await this.fetchIfChanged(url, {})) as FetchedPage;
+  }
+
+  /** Like fetch, but returns { notModified } on HTTP 304 when validators are given. */
+  async fetchIfChanged(
+    url: string,
+    validators: Validators,
+  ): Promise<FetchedPage | NotModified> {
     // One deadline for the whole redirect chain and body.
     const signal = AbortSignal.timeout(this.opts.timeoutMs);
     try {
-      return await this.follow(new URL(url), signal);
+      return await this.follow(new URL(url), signal, validators);
     } catch (err) {
       throw this.classify(err, signal);
     }
   }
 
-  private async follow(start: URL, signal: AbortSignal): Promise<FetchedPage> {
+  private async follow(
+    start: URL,
+    signal: AbortSignal,
+    validators: Validators,
+  ): Promise<FetchedPage | NotModified> {
     let url = start;
     for (let hop = 0; ; hop++) {
       this.assertUrlAllowed(url);
-      const res = await this.request(url, signal);
+      const res = await this.request(url, signal, validators);
       const status = res.statusCode ?? 0;
+
+      if (status === 304 && (validators.etag || validators.lastModified)) {
+        res.resume();
+        return { notModified: true };
+      }
 
       if (REDIRECT_STATUSES.has(status)) {
         res.resume();
@@ -107,6 +136,8 @@ export class SafeFetcher {
         status,
         contentType,
         html: decodeHtml(body, contentType),
+        etag: header(res, 'etag'),
+        lastModified: header(res, 'last-modified'),
       };
     }
   }
@@ -133,7 +164,11 @@ export class SafeFetcher {
     }
   }
 
-  private request(url: URL, signal: AbortSignal): Promise<IncomingMessage> {
+  private request(
+    url: URL,
+    signal: AbortSignal,
+    validators: Validators,
+  ): Promise<IncomingMessage> {
     const client = url.protocol === 'https:' ? https : http;
     return new Promise((resolve, reject) => {
       const req = client.request(
@@ -147,6 +182,10 @@ export class SafeFetcher {
             'user-agent': this.opts.userAgent,
             accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1',
             'accept-encoding': 'gzip, deflate, br',
+            ...(validators.etag && { 'if-none-match': validators.etag }),
+            ...(validators.lastModified && {
+              'if-modified-since': validators.lastModified,
+            }),
           },
         },
         resolve,
@@ -234,6 +273,11 @@ export class SafeFetcher {
     }
     return new TransientIngestionError(code ? `${code}: ${message}` : message);
   }
+}
+
+function header(res: IncomingMessage, name: string): string | null {
+  const v = res.headers[name];
+  return typeof v === 'string' && v.length <= 500 ? v : null;
 }
 
 function decodeHtml(body: Buffer, contentType: string): string {

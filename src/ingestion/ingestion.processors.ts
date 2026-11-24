@@ -1,5 +1,6 @@
 import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Job, Queue } from 'bullmq';
 import { Attempt, IngestionService } from './ingestion.service';
 import {
@@ -7,6 +8,9 @@ import {
   EXTRACT_QUEUE,
   FETCH_QUEUE,
   IngestionJobData,
+  REEMBED_JOB,
+  REFRESH_PLAN_QUEUE,
+  REFRESH_QUEUE,
   SWEEP_QUEUE,
 } from './queue/ingestion-queue.constants';
 
@@ -41,9 +45,12 @@ export class ExtractProcessor extends WorkerHost {
 
 // Gemini free tier has low request limits; the limiter is per queue across
 // all workers (stored in Redis). Each job makes ceil(chunks / 50) requests.
+// Read from env at import time because decorator options are static.
+const EMBED_JOBS_PER_MINUTE = Number(process.env.EMBED_JOBS_PER_MINUTE) || 20;
+
 @Processor(EMBED_QUEUE, {
   concurrency: 1,
-  limiter: { max: 20, duration: 60_000 },
+  limiter: { max: EMBED_JOBS_PER_MINUTE, duration: 60_000 },
 })
 export class EmbedProcessor extends WorkerHost {
   constructor(private readonly ingestion: IngestionService) {
@@ -51,7 +58,9 @@ export class EmbedProcessor extends WorkerHost {
   }
 
   process(job: Job<IngestionJobData>) {
-    return this.ingestion.embed(job.data.bookmarkId, attemptOf(job));
+    return job.name === REEMBED_JOB
+      ? this.ingestion.reembed(job.data.bookmarkId)
+      : this.ingestion.embed(job.data.bookmarkId, attemptOf(job));
   }
 }
 
@@ -78,5 +87,50 @@ export class SweepProcessor extends WorkerHost implements OnModuleInit {
 
   process() {
     return this.ingestion.sweep();
+  }
+}
+
+// Trickles a scheduled batch out instead of fetching hundreds of pages at once.
+@Processor(REFRESH_QUEUE, {
+  concurrency: 3,
+  limiter: { max: 30, duration: 60_000 },
+})
+export class RefreshProcessor extends WorkerHost {
+  constructor(private readonly ingestion: IngestionService) {
+    super();
+  }
+
+  process(job: Job<IngestionJobData>) {
+    return this.ingestion.refresh(job.data.bookmarkId);
+  }
+}
+
+@Processor(REFRESH_PLAN_QUEUE, { concurrency: 1 })
+export class RefreshPlanProcessor extends WorkerHost implements OnModuleInit {
+  constructor(
+    private readonly ingestion: IngestionService,
+    private readonly config: ConfigService,
+    @InjectQueue(REFRESH_PLAN_QUEUE) private readonly planQueue: Queue,
+  ) {
+    super();
+  }
+
+  // Cron job scheduler: one planning run per slot across all app instances.
+  async onModuleInit() {
+    await this.planQueue.upsertJobScheduler(
+      'content-refresh',
+      {
+        pattern: this.config.getOrThrow<string>('REFRESH_CRON'),
+        tz: this.config.getOrThrow<string>('REFRESH_TIMEZONE'),
+      },
+      { name: 'plan', opts: { removeOnComplete: true, removeOnFail: 100 } },
+    );
+  }
+
+  process() {
+    return this.ingestion.planRefreshes(
+      this.config.getOrThrow<number>('REFRESH_MAX_PER_RUN'),
+      this.config.getOrThrow<number>('REFRESH_MAX_PER_USER_PER_RUN'),
+    );
   }
 }

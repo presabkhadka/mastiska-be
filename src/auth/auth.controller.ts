@@ -1,5 +1,16 @@
-import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  LoginRateLimitGuard,
+  RegisterRateLimitGuard,
+} from './auth-rate-limit.guard';
 import { AuthService } from './auth.service';
 import {
   CurrentUser,
@@ -16,6 +27,7 @@ export class AuthController {
 
   @Public()
   @Post('register')
+  @UseGuards(RegisterRateLimitGuard)
   register(@Body() dto: RegisterDto) {
     return this.auth.register(dto);
   }
@@ -23,6 +35,7 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(200)
+  @UseGuards(LoginRateLimitGuard)
   login(@Body() dto: LoginDto) {
     return this.auth.login(dto);
   }

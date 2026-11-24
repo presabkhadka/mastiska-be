@@ -56,6 +56,10 @@ export class Bookmark extends BaseEntity {
   @Column({ name: 'read_at', type: 'timestamptz', nullable: true })
   readAt: Date | null;
 
+  /** Opt-in: include in the scheduled content refresh. */
+  @Column({ name: 'auto_refresh', default: false })
+  autoRefresh: boolean;
+
   /** Owned by the pipeline; change only via transitionProcessingState. */
   @Column({
     name: 'processing_state',

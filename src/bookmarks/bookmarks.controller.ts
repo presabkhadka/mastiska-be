@@ -10,16 +10,25 @@ import {
   Post,
   Put,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   CurrentUser,
   type AuthUser,
 } from '../auth/decorators/current-user.decorator';
+import { UserRateLimitGuard } from '../common/rate-limit/user-rate-limit.guard';
 import { BookmarksService } from './bookmarks.service';
 import { BookmarkQueryDto } from './dto/bookmark-query.dto';
 import { CreateBookmarkDto } from './dto/create-bookmark.dto';
 import { UpdateBookmarkDto } from './dto/update-bookmark.dto';
+
+// Each refresh is an outbound fetch (and maybe embedding calls).
+const RefreshRateLimitGuard = UserRateLimitGuard(
+  'refresh',
+  'REFRESH_RATE_LIMIT_PER_MINUTE',
+  'REFRESH_RATE_LIMIT_PER_DAY',
+);
 
 @ApiTags('bookmarks')
 @ApiBearerAuth()
@@ -60,6 +69,16 @@ export class BookmarksController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.bookmarks.reprocess(user.id, id);
+  }
+
+  @Post(':id/refresh')
+  @HttpCode(202)
+  @UseGuards(RefreshRateLimitGuard)
+  refresh(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.bookmarks.refresh(user.id, id);
   }
 
   @Patch(':id')

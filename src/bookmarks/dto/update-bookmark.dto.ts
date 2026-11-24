@@ -25,4 +25,12 @@ export class UpdateBookmarkDto {
   @IsOptional()
   @IsBoolean()
   isRead?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Include this bookmark in the twice-daily content refresh (off by default)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  autoRefresh?: boolean;
 }

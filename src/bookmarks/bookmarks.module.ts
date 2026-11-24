@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CollectionsModule } from '../collections/collections.module';
+import { RateLimitModule } from '../common/rate-limit/rate-limit.module';
 import { IngestionQueueModule } from '../ingestion/queue/ingestion-queue.module';
 import { TagsModule } from '../tags/tags.module';
 import { BookmarkContent } from './bookmark-content.entity';
@@ -16,6 +17,7 @@ import { CollectionBookmarksController } from './collection-bookmarks.controller
     IngestionQueueModule,
     TagsModule,
     CollectionsModule,
+    RateLimitModule,
   ],
   controllers: [BookmarksController, CollectionBookmarksController],
   providers: [BookmarksService, BookmarkIdentityService],

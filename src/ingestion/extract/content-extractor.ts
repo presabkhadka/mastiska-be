@@ -1,6 +1,7 @@
 import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import { PermanentIngestionError } from '../ingestion-errors';
+import { sanitizeHtml } from './sanitize-html';
 
 export interface ExtractedContent {
   title: string | null;
@@ -10,7 +11,7 @@ export interface ExtractedContent {
   excerpt: string | null;
   publishedTime: string | null;
   sourceCanonicalUrl: string | null;
-  /** Readability output. Not sanitized: sanitize before rendering. */
+  /** Readability output passed through the allowlist sanitizer. */
   contentHtml: string;
   textContent: string;
   wordCount: number;
@@ -61,7 +62,7 @@ export class ContentExtractor {
       excerpt: clean(article.excerpt),
       publishedTime: clean(article.publishedTime),
       sourceCanonicalUrl: canonical,
-      contentHtml: stripNul(article.content),
+      contentHtml: sanitizeHtml(stripNul(article.content)),
       textContent,
       wordCount,
     };

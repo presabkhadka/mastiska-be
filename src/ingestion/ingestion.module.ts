@@ -11,6 +11,8 @@ import {
   EmbedProcessor,
   ExtractProcessor,
   FetchProcessor,
+  RefreshPlanProcessor,
+  RefreshProcessor,
   SweepProcessor,
 } from './ingestion.processors';
 import { IngestionService } from './ingestion.service';
@@ -32,6 +34,8 @@ import { IngestionQueueModule } from './queue/ingestion-queue.module';
     ExtractProcessor,
     EmbedProcessor,
     SweepProcessor,
+    RefreshProcessor,
+    RefreshPlanProcessor,
   ],
 })
 export class IngestionModule {}

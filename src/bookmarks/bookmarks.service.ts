@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, QueryDeepPartialEntity, Repository } from 'typeorm';
@@ -13,6 +14,7 @@ import {
   assertTransition,
   ProcessingState,
 } from '../ingestion/processing-state';
+import { sanitizeHtml } from '../ingestion/extract/sanitize-html';
 import { IngestionQueue } from '../ingestion/queue/ingestion-queue.service';
 import { TagsService } from '../tags/tags.service';
 import { BookmarkContent } from './bookmark-content.entity';
@@ -136,8 +138,19 @@ export class BookmarksService {
     id: string,
     dto: UpdateBookmarkDto,
   ): Promise<Bookmark> {
-    const { isRead, title, isFavorite, isArchived } = dto;
+    const { isRead, title, isFavorite, isArchived, autoRefresh } = dto;
     const patch: QueryDeepPartialEntity<Bookmark> = {};
+    if (autoRefresh !== undefined) patch.autoRefresh = autoRefresh;
+    // Turning it on makes the bookmark due on the next scheduled run.
+    if (autoRefresh === true) {
+      await this.contents.query(
+        `UPDATE bookmark_contents c
+         SET next_check_at = now(), refresh_failures = 0
+         FROM bookmarks b
+         WHERE c.bookmark_id = b.id AND b.id = $1 AND b.user_id = $2 AND NOT b.auto_refresh`,
+        [id, userId],
+      );
+    }
     if (title !== undefined) patch.title = title;
     if (isFavorite !== undefined) patch.isFavorite = isFavorite;
     if (isArchived !== undefined) patch.isArchived = isArchived;
@@ -173,12 +186,38 @@ export class BookmarksService {
     return this.findOne(userId, id);
   }
 
+  async refresh(
+    userId: string,
+    id: string,
+  ): Promise<{ bookmarkId: string; queued: true }> {
+    const b = await this.bookmarks.findOne({
+      where: { id, userId },
+      select: { id: true, processingState: true },
+    });
+    if (!b) throw new NotFoundException('Bookmark not found');
+    if (b.processingState !== ProcessingState.Ready) {
+      throw new ConflictException(
+        `Bookmark is ${b.processingState}; only ready bookmarks can be refreshed (use /reprocess for failed or unsupported)`,
+      );
+    }
+    try {
+      await this.ingestion.enqueueManualRefresh(id);
+    } catch (err) {
+      this.logger.warn(`Failed to enqueue refresh for ${id}: ${String(err)}`);
+      throw new ServiceUnavailableException('Refresh queue unavailable; retry');
+    }
+    return { bookmarkId: id, queued: true };
+  }
+
   async getContent(userId: string, id: string): Promise<BookmarkContent> {
     await this.assertOwned(userId, id);
     const content = await this.contents.findOneBy({ bookmarkId: id });
     if (!content?.extractedAt) {
       throw new NotFoundException('Content not extracted yet');
     }
+    // Also covers rows extracted before sanitizing existed.
+    if (content.contentHtml)
+      content.contentHtml = sanitizeHtml(content.contentHtml);
     return content;
   }
 

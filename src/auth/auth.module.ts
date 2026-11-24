@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule, JwtModuleOptions, JwtSignOptions } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { RateLimitModule } from '../common/rate-limit/rate-limit.module';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -13,6 +14,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   imports: [
     UsersModule,
     PassportModule,
+    RateLimitModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService): JwtModuleOptions => ({
