@@ -17,7 +17,7 @@ export class BookmarkIdentityService {
   canonicalize = (url: string): string => {
     const u = new URL(url);
 
-    if (u.hostname.startsWith('www.')) u.hostname.slice(4);
+    if (u.hostname.startsWith('www.')) u.hostname = u.hostname.slice(4);
 
     for (const key of [...u.searchParams.keys()]) {
       u.searchParams.delete(key);

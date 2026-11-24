@@ -1,10 +1,6 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { CollectionsService } from '../collections/collections.service';
 import { isUniqueViolation } from '../common/db-errors';
 import { paginate, Paginated } from '../common/dto/paginated.dto';
