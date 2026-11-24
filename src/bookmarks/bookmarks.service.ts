@@ -1,9 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryDeepPartialEntity, Repository } from 'typeorm';
 import { CollectionsService } from '../collections/collections.service';
 import { isUniqueViolation } from '../common/db-errors';
 import { paginate, Paginated } from '../common/dto/paginated.dto';
+import {
+  assertTransition,
+  ProcessingState,
+} from '../ingestion/processing-state';
 import { TagsService } from '../tags/tags.service';
 import { BookmarkIdentityService } from './bookmark-identity.service';
 import { Bookmark } from './bookmark.entity';
@@ -45,6 +49,11 @@ export class BookmarksService {
     }
     if (q.isArchived !== undefined) {
       qb.andWhere('b.isArchived = :isArchived', { isArchived: q.isArchived });
+    }
+    if (q.processingState) {
+      qb.andWhere('b.processingState = :processingState', {
+        processingState: q.processingState,
+      });
     }
     if (q.isFavorite !== undefined) {
       qb.andWhere('b.isFavorite = :isFavorite', { isFavorite: q.isFavorite });
@@ -89,6 +98,7 @@ export class BookmarksService {
         originalUrl: dto.url,
         canonicalUrl: this.identity.canonicalize(dto.url),
         title: dto.title ?? null,
+        processingState: ProcessingState.Pending,
       });
       return await this.bookmarks.save(bookmark);
     } catch (error) {
@@ -100,17 +110,47 @@ export class BookmarksService {
     }
   }
 
+  // Write only user-owned columns so a stale read can't clobber processing_state.
   async update(
     userId: string,
     id: string,
     dto: UpdateBookmarkDto,
   ): Promise<Bookmark> {
-    const b = await this.findOne(userId, id);
-    const { isRead, ...fields } = dto;
-    this.bookmarks.merge(b, fields);
-    if (isRead === true && !b.readAt) b.readAt = new Date();
-    if (isRead === false) b.readAt = null;
-    return this.bookmarks.save(b);
+    const { isRead, title, isFavorite, isArchived } = dto;
+    const patch: QueryDeepPartialEntity<Bookmark> = {};
+    if (title !== undefined) patch.title = title;
+    if (isFavorite !== undefined) patch.isFavorite = isFavorite;
+    if (isArchived !== undefined) patch.isArchived = isArchived;
+    // Keep the first read time: only set readAt when it is still null.
+    if (isRead === true) patch.readAt = () => 'COALESCE(read_at, now())';
+    if (isRead === false) patch.readAt = null;
+
+    if (Object.keys(patch).length > 0) {
+      const res = await this.bookmarks.update({ id, userId }, patch);
+      if (!res.affected) throw new NotFoundException('Bookmark not found');
+    }
+    return this.findOne(userId, id);
+  }
+
+  /** Compare-and-set; false if another worker moved it first. */
+  async transitionProcessingState(
+    id: string,
+    from: ProcessingState,
+    to: ProcessingState,
+    error: string | null = null,
+  ): Promise<boolean> {
+    assertTransition(from, to);
+    const res = await this.bookmarks
+      .createQueryBuilder()
+      .update(Bookmark)
+      .set({
+        processingState: to,
+        processingError: error,
+        processingStateChangedAt: () => 'now()',
+      })
+      .where('id = :id AND processing_state = :from', { id, from })
+      .execute();
+    return res.affected === 1;
   }
 
   async remove(userId: string, id: string): Promise<void> {

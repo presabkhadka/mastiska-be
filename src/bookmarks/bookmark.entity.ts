@@ -9,6 +9,7 @@ import {
   OneToMany,
 } from 'typeorm';
 import { BaseEntity } from '../common/entities/base.entity';
+import { ProcessingState } from '../ingestion/processing-state';
 import { Collection } from '../collections/collection.entity';
 import { Note } from '../notes/note.entity';
 import { Tag } from '../tags/tag.entity';
@@ -17,6 +18,11 @@ import { User } from '../users/user.entity';
 /** A saved resource. */
 @Entity('bookmarks')
 @Index('idx_bookmarks_user_created', ['userId', 'createdAt'])
+// For sweeping rows stuck in an in-progress state (crashed workers).
+@Index('idx_bookmarks_processing_state_changed', [
+  'processingState',
+  'processingStateChangedAt',
+])
 @Index('uq_bookmarks_user_canonical', ['userId', 'canonicalUrl'], {
   unique: true,
 })
@@ -46,6 +52,26 @@ export class Bookmark extends BaseEntity {
 
   @Column({ name: 'read_at', type: 'timestamptz', nullable: true })
   readAt: Date | null;
+
+  /** Owned by the pipeline; change only via transitionProcessingState. */
+  @Column({
+    name: 'processing_state',
+    type: 'enum',
+    enum: ProcessingState,
+    enumName: 'bookmark_processing_state',
+    default: ProcessingState.Pending,
+  })
+  processingState: ProcessingState;
+
+  @Column({ name: 'processing_error', type: 'text', nullable: true })
+  processingError: string | null;
+
+  @Column({
+    name: 'processing_state_changed_at',
+    type: 'timestamptz',
+    default: () => 'now()',
+  })
+  processingStateChangedAt: Date;
 
   @ManyToMany(() => Tag, (tag) => tag.bookmarks)
   @JoinTable({

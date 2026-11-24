@@ -1,7 +1,15 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsDate, IsIn, IsOptional, IsUUID } from 'class-validator';
+import {
+  IsBoolean,
+  IsDate,
+  IsEnum,
+  IsIn,
+  IsOptional,
+  IsUUID,
+} from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { ProcessingState } from '../../ingestion/processing-state';
 
 export const BOOKMARK_SORT_FIELDS = [
   'createdAt',
@@ -40,6 +48,11 @@ export class BookmarkQueryDto extends PaginationQueryDto {
   @Transform(toBool)
   @IsBoolean()
   isFavorite?: boolean;
+
+  @ApiPropertyOptional({ enum: ProcessingState })
+  @IsOptional()
+  @IsEnum(ProcessingState)
+  processingState?: ProcessingState;
 
   @ApiPropertyOptional({ description: 'Saved at or after (ISO 8601)' })
   @IsOptional()
