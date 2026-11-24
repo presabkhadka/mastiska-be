@@ -3,6 +3,8 @@ export enum ProcessingState {
   Fetching = 'fetching',
   Fetched = 'fetched',
   Extracting = 'extracting',
+  Extracted = 'extracted',
+  Embedding = 'embedding',
   Ready = 'ready',
   Failed = 'failed',
   Unsupported = 'unsupported',
@@ -16,7 +18,9 @@ export const PROCESSING_TRANSITIONS: Readonly<
   [S.Pending]: [S.Fetching],
   [S.Fetching]: [S.Fetched, S.Pending, S.Failed, S.Unsupported],
   [S.Fetched]: [S.Extracting],
-  [S.Extracting]: [S.Ready, S.Fetched, S.Failed, S.Unsupported],
+  [S.Extracting]: [S.Extracted, S.Fetched, S.Failed, S.Unsupported],
+  [S.Extracted]: [S.Embedding],
+  [S.Embedding]: [S.Ready, S.Extracted, S.Failed, S.Unsupported],
   [S.Ready]: [S.Pending],
   [S.Failed]: [S.Pending],
   [S.Unsupported]: [S.Pending],
@@ -26,6 +30,7 @@ export const PROCESSING_TRANSITIONS: Readonly<
 export const IN_PROGRESS_STATES: readonly ProcessingState[] = [
   S.Fetching,
   S.Extracting,
+  S.Embedding,
 ];
 
 export function canTransition(

@@ -1,0 +1,316 @@
+{
+  "urls": [
+    "https://en.wikipedia.org/wiki/Finite-state_machine",
+    "https://en.wikipedia.org/wiki/Idempotence",
+    "https://www.usamaamjid.com/blog/async-local-storage-nodejs-24",
+    "https://www.usamaamjid.com/blog/bulk-messaging-control-architecture-fintech"
+  ],
+  "questions": [
+    {
+      "q": "what happens when you put a coin in a turnstile",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "Finite-state_machine",
+          "contains": "Unlocks the turnstile"
+        },
+        {
+          "url": "Finite-state_machine",
+          "contains": "three rotating arms"
+        }
+      ]
+    },
+    {
+      "q": "difference between Mealy and Moore machines",
+      "kind": "keyword",
+      "expected": [
+        {
+          "url": "Finite-state_machine",
+          "contains": "output of a Mealy machine is a function"
+        },
+        {
+          "url": "Finite-state_machine",
+          "contains": "output depends only on state"
+        }
+      ]
+    },
+    {
+      "q": "what are acceptors or recognizers in automata",
+      "kind": "keyword",
+      "expected": [
+        {
+          "url": "Finite-state_machine",
+          "contains": "Acceptors (also called detectors or recognizers)"
+        }
+      ]
+    },
+    {
+      "q": "which class of languages can a finite automaton recognize",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "Finite-state_machine",
+          "contains": "regular languages"
+        }
+      ]
+    },
+    {
+      "q": "state transition table",
+      "kind": "keyword",
+      "expected": [
+        {
+          "url": "Finite-state_machine",
+          "contains": "State-transition table"
+        }
+      ]
+    },
+    {
+      "q": "is a state machine as powerful as a Turing machine",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "Finite-state_machine",
+          "contains": "computational power as a Turing machine"
+        }
+      ]
+    },
+    {
+      "q": "what do you call a state machine with no output",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "Finite-state_machine",
+          "contains": "semiautomaton"
+        }
+      ]
+    },
+    {
+      "q": "state machines used in compiler lexical analysis",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "Finite-state_machine",
+          "contains": "compilers"
+        }
+      ]
+    },
+    {
+      "q": "is applying an operation twice the same as applying it once",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "Idempotence",
+          "contains": "same effect whether done once or multiple times"
+        },
+        {
+          "url": "Idempotence",
+          "contains": "Idempotence (, ) is the property"
+        }
+      ]
+    },
+    {
+      "q": "why are POST requests not idempotent",
+      "kind": "keyword",
+      "expected": [
+        {
+          "url": "Idempotence",
+          "contains": "POST requests"
+        }
+      ]
+    },
+    {
+      "q": "does reading a customer record from a database change anything",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "Idempotence",
+          "contains": "looking up a customer's name and address"
+        }
+      ]
+    },
+    {
+      "q": "replay a failed multi-step workflow without side effects",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "Idempotence",
+          "contains": "replayed without side-effects"
+        }
+      ]
+    },
+    {
+      "q": "idempotent elements of a group",
+      "kind": "keyword",
+      "expected": [
+        {
+          "url": "Idempotence",
+          "contains": "the identity element e is the only idempotent element"
+        }
+      ]
+    },
+    {
+      "q": "count the idempotent functions on a finite set",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "Idempotence",
+          "contains": "number of different idempotent functions"
+        }
+      ]
+    },
+    {
+      "q": "what is AsyncLocalStorage in Node.js",
+      "kind": "keyword",
+      "expected": [
+        {
+          "url": "async-local-storage",
+          "contains": "What is AsyncLocalStorage"
+        }
+      ]
+    },
+    {
+      "q": "attach a request id to every log line without passing it through every function",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "async-local-storage",
+          "contains": "Logger that reads from context"
+        },
+        {
+          "url": "async-local-storage",
+          "contains": "context helper"
+        }
+      ]
+    },
+    {
+      "q": "should I keep database connections in request context",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "async-local-storage",
+          "contains": "Not a data store"
+        }
+      ]
+    },
+    {
+      "q": "provider only allows 3000 messages per day but we have 50000 users",
+      "kind": "keyword",
+      "expected": [
+        {
+          "url": "bulk-messaging",
+          "contains": "50,000 users"
+        },
+        {
+          "url": "bulk-messaging",
+          "contains": "quota is 3,000"
+        }
+      ]
+    },
+    {
+      "q": "let an admin stop a running campaign even if jobs are already queued",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "bulk-messaging",
+          "contains": "Status Guard"
+        }
+      ]
+    },
+    {
+      "q": "producer consumer design for sending notifications in batches",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "bulk-messaging",
+          "contains": "Producer-Consumer model"
+        }
+      ]
+    },
+    {
+      "q": "how do I make an operation safe to retry if a request is sent twice",
+      "kind": "cross",
+      "expected": [
+        {
+          "url": "Idempotence",
+          "contains": "replayed without side-effects"
+        },
+        {
+          "url": "Idempotence",
+          "contains": "POST requests"
+        },
+        {
+          "url": "Idempotence",
+          "contains": "same effect whether done once or multiple times"
+        }
+      ]
+    },
+    {
+      "q": "server runs out of memory loading every user at once",
+      "kind": "paraphrase",
+      "expected": [
+        {
+          "url": "bulk-messaging",
+          "contains": "Memory Overload"
+        }
+      ]
+    },
+    {
+      "q": "Medvedev machine",
+      "kind": "identifier",
+      "expected": [
+        {
+          "url": "Finite-state_machine",
+          "contains": "In a Medvedev machine"
+        }
+      ]
+    },
+    {
+      "q": "getStore returns undefined",
+      "kind": "identifier",
+      "expected": [
+        {
+          "url": "async-local-storage",
+          "contains": "Always use getStore() defensively"
+        },
+        {
+          "url": "async-local-storage",
+          "contains": "avoid undefined"
+        }
+      ]
+    },
+    {
+      "q": "pino logger setup",
+      "kind": "identifier",
+      "expected": [
+        {
+          "url": "async-local-storage",
+          "contains": "import pino from 'pino'"
+        },
+        {
+          "url": "async-local-storage",
+          "contains": "npm install pino"
+        }
+      ]
+    },
+    {
+      "q": "UML statecharts",
+      "kind": "identifier",
+      "expected": [
+        {
+          "url": "Finite-state_machine",
+          "contains": "Unified Modeling Language has a notation"
+        }
+      ]
+    },
+    {
+      "q": "Idle Running Paused Completed",
+      "kind": "identifier",
+      "expected": [
+        {
+          "url": "bulk-messaging",
+          "contains": "Idle → Running → Paused → Completed"
+        }
+      ]
+    }
+  ]
+}

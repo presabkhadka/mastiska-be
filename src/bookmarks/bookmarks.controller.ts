@@ -45,6 +45,23 @@ export class BookmarksController {
     return this.bookmarks.create(user.id, dto);
   }
 
+  @Get(':id/content')
+  content(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.bookmarks.getContent(user.id, id);
+  }
+
+  @Post(':id/reprocess')
+  @HttpCode(202)
+  reprocess(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.bookmarks.reprocess(user.id, id);
+  }
+
   @Patch(':id')
   update(
     @CurrentUser() user: AuthUser,

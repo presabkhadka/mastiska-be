@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CollectionsModule } from '../collections/collections.module';
+import { IngestionQueueModule } from '../ingestion/queue/ingestion-queue.module';
 import { TagsModule } from '../tags/tags.module';
+import { BookmarkContent } from './bookmark-content.entity';
 import { BookmarkIdentityService } from './bookmark-identity.service';
 import { Bookmark } from './bookmark.entity';
 import { BookmarksController } from './bookmarks.controller';
@@ -10,7 +12,8 @@ import { CollectionBookmarksController } from './collection-bookmarks.controller
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Bookmark]),
+    TypeOrmModule.forFeature([Bookmark, BookmarkContent]),
+    IngestionQueueModule,
     TagsModule,
     CollectionsModule,
   ],

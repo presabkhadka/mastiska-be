@@ -1,6 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryDeepPartialEntity, Repository } from 'typeorm';
+import { EntityManager, QueryDeepPartialEntity, Repository } from 'typeorm';
 import { CollectionsService } from '../collections/collections.service';
 import { isUniqueViolation } from '../common/db-errors';
 import { paginate, Paginated } from '../common/dto/paginated.dto';
@@ -8,18 +13,31 @@ import {
   assertTransition,
   ProcessingState,
 } from '../ingestion/processing-state';
+import { IngestionQueue } from '../ingestion/queue/ingestion-queue.service';
 import { TagsService } from '../tags/tags.service';
+import { BookmarkContent } from './bookmark-content.entity';
 import { BookmarkIdentityService } from './bookmark-identity.service';
 import { Bookmark } from './bookmark.entity';
 import { BookmarkQueryDto } from './dto/bookmark-query.dto';
 import { CreateBookmarkDto } from './dto/create-bookmark.dto';
 import { UpdateBookmarkDto } from './dto/update-bookmark.dto';
 
+const REPROCESSABLE: readonly ProcessingState[] = [
+  ProcessingState.Ready,
+  ProcessingState.Failed,
+  ProcessingState.Unsupported,
+];
+
 @Injectable()
 export class BookmarksService {
+  private readonly logger = new Logger(BookmarksService.name);
+
   constructor(
     @InjectRepository(Bookmark)
     private readonly bookmarks: Repository<Bookmark>,
+    @InjectRepository(BookmarkContent)
+    private readonly contents: Repository<BookmarkContent>,
+    private readonly ingestion: IngestionQueue,
     private readonly identity: BookmarkIdentityService,
     private readonly tags: TagsService,
     private readonly collections: CollectionsService,
@@ -100,7 +118,9 @@ export class BookmarksService {
         title: dto.title ?? null,
         processingState: ProcessingState.Pending,
       });
-      return await this.bookmarks.save(bookmark);
+      const saved = await this.bookmarks.save(bookmark);
+      await this.enqueueFetch(saved.id);
+      return saved;
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
       return await this.bookmarks.findOneByOrFail({
@@ -132,15 +152,46 @@ export class BookmarksService {
     return this.findOne(userId, id);
   }
 
+  async reprocess(userId: string, id: string): Promise<Bookmark> {
+    const b = await this.bookmarks.findOne({
+      where: { id, userId },
+      select: { id: true, processingState: true },
+    });
+    if (!b) throw new NotFoundException('Bookmark not found');
+    if (!REPROCESSABLE.includes(b.processingState)) {
+      throw new ConflictException(
+        `Bookmark is ${b.processingState}; only ${REPROCESSABLE.join(', ')} can be reprocessed`,
+      );
+    }
+    const moved = await this.transitionProcessingState(
+      id,
+      b.processingState,
+      ProcessingState.Pending,
+    );
+    if (!moved) throw new ConflictException('Processing state changed; retry');
+    await this.enqueueFetch(id);
+    return this.findOne(userId, id);
+  }
+
+  async getContent(userId: string, id: string): Promise<BookmarkContent> {
+    await this.assertOwned(userId, id);
+    const content = await this.contents.findOneBy({ bookmarkId: id });
+    if (!content?.extractedAt) {
+      throw new NotFoundException('Content not extracted yet');
+    }
+    return content;
+  }
+
   /** Compare-and-set; false if another worker moved it first. */
   async transitionProcessingState(
     id: string,
     from: ProcessingState,
     to: ProcessingState,
     error: string | null = null,
+    manager: EntityManager = this.bookmarks.manager,
   ): Promise<boolean> {
     assertTransition(from, to);
-    const res = await this.bookmarks
+    const res = await manager
       .createQueryBuilder()
       .update(Bookmark)
       .set({
@@ -151,6 +202,15 @@ export class BookmarksService {
       .where('id = :id AND processing_state = :from', { id, from })
       .execute();
     return res.affected === 1;
+  }
+
+  // Best-effort: if Redis is down the row stays pending and the sweeper retries.
+  private async enqueueFetch(id: string): Promise<void> {
+    try {
+      await this.ingestion.enqueueFetch(id);
+    } catch (err) {
+      this.logger.warn(`Failed to enqueue fetch for ${id}: ${String(err)}`);
+    }
   }
 
   async remove(userId: string, id: string): Promise<void> {

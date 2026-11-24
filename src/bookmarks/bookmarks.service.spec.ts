@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { QueryFailedError } from 'typeorm';
@@ -7,7 +7,9 @@ import {
   IllegalStateTransitionError,
   ProcessingState,
 } from '../ingestion/processing-state';
+import { IngestionQueue } from '../ingestion/queue/ingestion-queue.service';
 import { TagsService } from '../tags/tags.service';
+import { BookmarkContent } from './bookmark-content.entity';
 import { BookmarkIdentityService } from './bookmark-identity.service';
 import { Bookmark } from './bookmark.entity';
 import { BookmarksService } from './bookmarks.service';
@@ -28,6 +30,7 @@ describe('BookmarksService', () => {
     merge: jest.fn((target: object, src: object) => Object.assign(target, src)),
     findOne: jest.fn(),
     existsBy: jest.fn(),
+    findOneByOrFail: jest.fn(),
     delete: jest.fn(),
     update: jest.fn<Promise<{ affected: number }>, [object, object]>(),
     createQueryBuilder: jest.fn(() => ({
@@ -35,12 +38,29 @@ describe('BookmarksService', () => {
       update: jest.fn(() => updateBuilder),
     })),
   };
+  Object.assign(repo, {
+    manager: { createQueryBuilder: repo.createQueryBuilder },
+  });
   const identity = { canonicalize: jest.fn((u: string) => `canon:${u}`) };
   const tags = { findOne: jest.fn() };
+  const queue = { enqueueFetch: jest.fn() };
+  const contents = { findOneBy: jest.fn() };
   const collections = { findOne: jest.fn() };
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+    repo.create.mockImplementation((x: Partial<Bookmark>) => ({ ...x }));
+    repo.save.mockImplementation((x: Partial<Bookmark>) =>
+      Promise.resolve({ id: 'b1', ...x }),
+    );
+    repo.merge.mockImplementation((t: object, src: object) =>
+      Object.assign(t, src),
+    );
+    repo.createQueryBuilder.mockImplementation(() => ({
+      relation: jest.fn(() => relationBuilder),
+      update: jest.fn(() => updateBuilder),
+    }));
+    identity.canonicalize.mockImplementation((u: string) => `canon:${u}`);
     relationBuilder.of.mockReturnValue(relationBuilder);
     updateBuilder.set.mockReturnValue(updateBuilder);
     updateBuilder.where.mockReturnValue(updateBuilder);
@@ -48,6 +68,8 @@ describe('BookmarksService', () => {
       providers: [
         BookmarksService,
         { provide: getRepositoryToken(Bookmark), useValue: repo },
+        { provide: getRepositoryToken(BookmarkContent), useValue: contents },
+        { provide: IngestionQueue, useValue: queue },
         { provide: BookmarkIdentityService, useValue: identity },
         { provide: TagsService, useValue: tags },
         { provide: CollectionsService, useValue: collections },
@@ -66,6 +88,56 @@ describe('BookmarksService', () => {
       title: null,
       processingState: ProcessingState.Pending,
     });
+    expect(queue.enqueueFetch).toHaveBeenCalledWith('b1');
+  });
+
+  it('create still succeeds when enqueueing fails', async () => {
+    queue.enqueueFetch.mockRejectedValueOnce(new Error('redis down'));
+    await expect(
+      service.create('u1', { url: 'https://x.dev/a' }),
+    ).resolves.toMatchObject({ id: 'b1' });
+  });
+
+  it('create does not enqueue for a duplicate save', async () => {
+    repo.save.mockRejectedValueOnce(
+      new QueryFailedError(
+        '',
+        [],
+        Object.assign(new Error(), { code: '23505' }),
+      ),
+    );
+    repo.findOneByOrFail.mockResolvedValueOnce({ id: 'existing' });
+    await expect(
+      service.create('u1', { url: 'https://x.dev/a' }),
+    ).resolves.toEqual({ id: 'existing' });
+    expect(queue.enqueueFetch).not.toHaveBeenCalled();
+  });
+
+  it('reprocess moves a terminal bookmark back to pending and enqueues', async () => {
+    repo.findOne
+      .mockResolvedValueOnce({
+        id: 'b1',
+        processingState: ProcessingState.Failed,
+      })
+      .mockResolvedValueOnce({ id: 'b1' });
+    updateBuilder.execute.mockResolvedValue({ affected: 1 });
+    await service.reprocess('u1', 'b1');
+    expect(updateBuilder.where).toHaveBeenCalledWith(
+      'id = :id AND processing_state = :from',
+      { id: 'b1', from: ProcessingState.Failed },
+    );
+    expect(queue.enqueueFetch).toHaveBeenCalledWith('b1');
+  });
+
+  it('reprocess refuses a bookmark that is still processing', async () => {
+    repo.findOne.mockResolvedValueOnce({
+      id: 'b1',
+      processingState: ProcessingState.Fetching,
+    });
+    await expect(service.reprocess('u1', 'b1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(queue.enqueueFetch).not.toHaveBeenCalled();
   });
 
   it('findOne scopes by user and 404s when not owned', async () => {
