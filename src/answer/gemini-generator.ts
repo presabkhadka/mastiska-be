@@ -39,6 +39,32 @@ export class GenerationError extends Error {
   }
 }
 
+/** A Gemini content turn, kept raw so thought signatures survive round trips. */
+export interface GeminiPart {
+  text?: string;
+  thought?: boolean;
+  thoughtSignature?: string;
+  functionCall?: { id?: string; name: string; args?: Record<string, unknown> };
+  functionResponse?: {
+    id?: string;
+    name: string;
+    response: Record<string, unknown>;
+  };
+}
+
+export interface GeminiContent {
+  role: 'user' | 'model';
+  parts: GeminiPart[];
+}
+
+interface GeminiResponse {
+  candidates?: {
+    finishReason?: string;
+    content?: { parts?: GeminiPart[] };
+  }[];
+  usageMetadata?: Record<string, unknown>;
+}
+
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 // 503 "high demand" was common in testing; 429 is the free-tier rate limit.
 const RETRYABLE = new Set([408, 429, 500, 502, 503, 504]);
@@ -57,27 +83,99 @@ export class GeminiGenerator {
     };
   }
 
+  /** Structured JSON answer (used by /ask). */
+  generateJson<T>(req: GenerateRequest): Promise<GenerateResult<T>> {
+    const body = {
+      systemInstruction: { parts: [{ text: req.system }] },
+      contents: [{ role: 'user', parts: [{ text: req.prompt }] }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: req.maxOutputTokens ?? 1024,
+        responseMimeType: 'application/json',
+        responseSchema: req.schema,
+        // Answering from given passages needs little reasoning; keeps latency down.
+        thinkingConfig: { thinkingLevel: 'low' },
+      },
+    };
+    return this.generate(body, (raw) => {
+      const candidate = raw.candidates?.[0];
+      const text = candidate?.content?.parts?.map((p) => p.text ?? '').join('');
+      if (!text) {
+        // e.g. SAFETY or MAX_TOKENS with no output; another try may succeed.
+        throw new GenerationError(
+          `empty response (${candidate?.finishReason ?? 'no candidate'})`,
+          true,
+        );
+      }
+      try {
+        return JSON.parse(text) as T;
+      } catch {
+        throw new GenerationError(
+          `invalid JSON (${candidate?.finishReason ?? '?'})`,
+          true,
+        );
+      }
+    });
+  }
+
+  /**
+   * Raw generateContent call (used by the assistant for function calling).
+   * `models` pins the call to specific models, e.g. the one a run started on.
+   */
+  generateContent(
+    body: object,
+    opts: { models?: string[]; deadlineMs?: number } = {},
+  ): Promise<GenerateResult<GeminiContent>> {
+    return this.generate(
+      body,
+      (raw) => {
+        const content = raw.candidates?.[0]?.content;
+        if (!content?.parts?.length) {
+          throw new GenerationError(
+            `empty response (${raw.candidates?.[0]?.finishReason ?? 'no candidate'})`,
+            true,
+          );
+        }
+        return { role: 'model', parts: content.parts };
+      },
+      opts.models,
+      opts.deadlineMs,
+    );
+  }
+
   /**
    * Tries each model in order. Transient errors retry the same model with
    * jittered backoff; every other failure falls through to the next model.
    */
-  async generateJson<T>(req: GenerateRequest): Promise<GenerateResult<T>> {
+  private async generate<T>(
+    body: object,
+    parse: (raw: GeminiResponse) => T,
+    models: string[] = this.cfg.models,
+    deadlineMs: number = this.cfg.deadlineMs,
+  ): Promise<GenerateResult<T>> {
     if (!this.cfg.apiKey) {
       throw new GenerationError('GEMINI_API_KEY is not set', false);
     }
-    const deadline = Date.now() + this.cfg.deadlineMs;
+    const deadline = Date.now() + deadlineMs;
     let last: GenerationError | undefined;
 
-    for (const model of this.cfg.models) {
+    for (const model of models) {
       for (let attempt = 0; attempt < this.cfg.attemptsPerModel; attempt++) {
         const remaining = deadline - Date.now();
         if (remaining <= 0) break;
+        const started = Date.now();
         try {
-          return await this.call<T>(
+          const raw = await this.call(
             model,
-            req,
+            body,
             Math.min(this.cfg.attemptTimeoutMs, remaining),
           );
+          return {
+            value: parse(raw),
+            model,
+            latencyMs: Date.now() - started,
+            usage: raw.usageMetadata ?? null,
+          };
         } catch (err) {
           last =
             err instanceof GenerationError
@@ -98,12 +196,11 @@ export class GeminiGenerator {
     throw last ?? new GenerationError('Generation deadline exceeded', true);
   }
 
-  private async call<T>(
+  private async call(
     model: string,
-    req: GenerateRequest,
+    body: object,
     timeoutMs: number,
-  ): Promise<GenerateResult<T>> {
-    const started = Date.now();
+  ): Promise<GeminiResponse> {
     let res: Response;
     try {
       res = await fetch(`${BASE_URL}/models/${model}:generateContent`, {
@@ -113,18 +210,7 @@ export class GeminiGenerator {
           'content-type': 'application/json',
           'x-goog-api-key': this.cfg.apiKey,
         },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: req.system }] },
-          contents: [{ role: 'user', parts: [{ text: req.prompt }] }],
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: req.maxOutputTokens ?? 1024,
-            responseMimeType: 'application/json',
-            responseSchema: req.schema,
-            // Answering from given passages needs little reasoning; keeps latency down.
-            thinkingConfig: { thinkingLevel: 'low' },
-          },
-        }),
+        body: JSON.stringify(body),
       });
     } catch (err) {
       const name = err instanceof Error ? err.name : '';
@@ -145,36 +231,7 @@ export class GeminiGenerator {
         res.status === 503 || res.status === 429,
       );
     }
-
-    const body = (await res.json()) as {
-      candidates?: {
-        finishReason?: string;
-        content?: { parts?: { text?: string }[] };
-      }[];
-      usageMetadata?: Record<string, unknown>;
-    };
-    const candidate = body.candidates?.[0];
-    const text = candidate?.content?.parts?.map((p) => p.text ?? '').join('');
-    if (!text) {
-      // e.g. SAFETY or MAX_TOKENS with no output; another try may succeed.
-      throw new GenerationError(
-        `empty response (${candidate?.finishReason ?? 'no candidate'})`,
-        true,
-      );
-    }
-    try {
-      return {
-        value: JSON.parse(text) as T,
-        model,
-        latencyMs: Date.now() - started,
-        usage: body.usageMetadata ?? null,
-      };
-    } catch {
-      throw new GenerationError(
-        `invalid JSON (${candidate?.finishReason ?? '?'})`,
-        true,
-      );
-    }
+    return (await res.json()) as GeminiResponse;
   }
 }
 

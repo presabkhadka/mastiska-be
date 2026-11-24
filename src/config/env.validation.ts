@@ -22,6 +22,8 @@ export const envValidationSchema = Joi.object({
   // Per user; 0 disables that window.
   ASK_RATE_LIMIT_PER_MINUTE: Joi.number().integer().min(0).default(5),
   ASK_RATE_LIMIT_PER_DAY: Joi.number().integer().min(0).default(50),
+  ASSISTANT_RATE_LIMIT_PER_MINUTE: Joi.number().integer().min(0).default(5),
+  ASSISTANT_RATE_LIMIT_PER_DAY: Joi.number().integer().min(0).default(50),
   // Comma-separated, tried in order when the previous model is overloaded,
   // rate-limited or times out; '' disables fallback.
   ANSWER_FALLBACK_MODELS: Joi.string()

@@ -60,3 +60,6 @@ tasks.md
 
 # retrieval eval query-vector cache
 test/retrieval/.query-cache.json
+
+# Decisions 
+decisions.md

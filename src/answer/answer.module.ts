@@ -28,5 +28,6 @@ import { GeminiGenerator } from './gemini-generator';
         }),
     },
   ],
+  exports: [GeminiGenerator],
 })
 export class AnswerModule {}

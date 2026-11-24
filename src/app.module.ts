@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AnswerModule } from './answer/answer.module';
+import { AssistantModule } from './assistant/assistant.module';
 import { AuthModule } from './auth/auth.module';
 import { BookmarksModule } from './bookmarks/bookmarks.module';
 import { CollectionsModule } from './collections/collections.module';
@@ -36,6 +37,7 @@ import { UsersModule } from './users/users.module';
     IngestionModule,
     RetrievalModule,
     AnswerModule,
+    AssistantModule,
   ],
   controllers: [HealthController],
 })
