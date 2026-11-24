@@ -14,16 +14,7 @@ import { Note } from '../notes/note.entity';
 import { Tag } from '../tags/tag.entity';
 import { User } from '../users/user.entity';
 
-/**
- * A saved resource. Only user-editable fields live here for now.
- *
- * HAND-CODE (plan.md §2A, §2C): resource identity and processing state.
- *  - canonicalUrl has NO unique constraint yet. Decide the identity rule
- *    (per-user? global resource + per-user save?) and add the constraint.
- *  - No ingestion/processing status column. Define the stages and legal
- *    transitions before adding one.
- *  - Extracted content, source metadata, and chunks belong in tables you design.
- */
+/** A saved resource. */
 @Entity('bookmarks')
 @Index('idx_bookmarks_user_created', ['userId', 'createdAt'])
 @Index('uq_bookmarks_user_canonical', ['userId', 'canonicalUrl'], {

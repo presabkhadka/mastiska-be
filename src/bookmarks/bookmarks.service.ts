@@ -82,10 +82,6 @@ export class BookmarksService {
     if (!exists) throw new NotFoundException('Bookmark not found');
   }
 
-  /**
-   * HAND-CODE (plan.md §2A/§2B): duplicate-save handling and enqueueing
-   * ingestion belong here once identity rules and job lifecycle are defined.
-   */
   async create(userId: string, dto: CreateBookmarkDto): Promise<Bookmark> {
     try {
       const bookmark = this.bookmarks.create({
@@ -104,11 +100,6 @@ export class BookmarksService {
     }
   }
 
-  /**
-   * HAND-CODE (plan.md §2C "safe updates when ingestion and user edits happen
-   * concurrently"): this is a plain read-modify-write. Once ingestion writes to
-   * the same row (e.g. title), decide on version checks or column ownership.
-   */
   async update(
     userId: string,
     id: string,

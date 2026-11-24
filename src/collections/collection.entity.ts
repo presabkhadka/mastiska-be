@@ -10,11 +10,6 @@ import { Bookmark } from '../bookmarks/bookmark.entity';
 import { BaseEntity } from '../common/entities/base.entity';
 import { User } from '../users/user.entity';
 
-/**
- * HAND-CODE (plan.md §3 "Collections and tags"): integrity constraints beyond
- * the join-table PK. E.g. should name be unique per user? Should the DB (not
- * just the service) guarantee a bookmark and collection share an owner?
- */
 @Entity('collections')
 @Index('idx_collections_user_created', ['userId', 'createdAt'])
 export class Collection extends BaseEntity {

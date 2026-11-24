@@ -30,10 +30,6 @@ export class NotesService {
     return this.notes.save(this.notes.create({ bookmarkId, body: dto.body }));
   }
 
-  /**
-   * HAND-CODE (plan.md §2C): last-write-wins. Add a version check if
-   * concurrent edits from multiple clients must not clobber each other.
-   */
   async update(
     userId: string,
     bookmarkId: string,
